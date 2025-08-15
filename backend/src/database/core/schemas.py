@@ -279,3 +279,17 @@ class ExpenseResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ExpenseDocumentUpload(BaseModel):
+    expense_id: int
+    filename: str
+    file_size: int
+    mime_type: str
+
+class ExpenseDocumentResponse(BaseModel):
+    success: bool
+    message: str
+    document_filename: Optional[str] = None
+    receipt_link: Optional[str] = None
+    file_size: Optional[int] = None
+    uploaded_at: Optional[datetime] = None
