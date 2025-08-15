@@ -1,0 +1,83 @@
+EXCEL FILE UPDATE REQUIREMENTS
+
+NEW SHEETS TO ADD:
+
+1. USERS SHEET
+   - user_id
+   - auth_user_id
+   - email
+   - first_name
+   - last_name
+   - full_name
+   - role
+   - status
+   - phone
+   - avatar_url
+   - department
+   - job_title
+   - hire_date
+   - last_login
+   - password_reset_required
+   - two_factor_enabled
+   - preferences
+   - permissions
+   - created_at
+   - updated_at
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+2. ROLE_PERMISSIONS SHEET
+   - permission_id
+   - role
+   - resource
+   - action
+   - conditions
+   - created_at
+
+EXISTING SHEETS TO UPDATE:
+
+3. CLIENTS SHEET (add these columns)
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+4. CLIENT_CONTACTS SHEET (add these columns)
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+5. CONTRACTS SHEET (add these columns)
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+6. EMPLOYEES SHEET (add these columns)
+   - user_id (references users.user_id)
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+7. AVAILABILITY SHEET (add these columns)
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+8. CLIENT_ASSIGNMENTS SHEET (add these columns)
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+9. DELIVERABLES SHEET (add these columns)
+   - created_by (references users.user_id)
+   - updated_by (references users.user_id)
+
+10. TIME_ENTRIES SHEET (add these columns)
+    - created_by (references users.user_id)
+    - updated_by (references users.user_id)
+
+11. BILLING SHEET (add these columns)
+    - created_by (references users.user_id)
+    - updated_by (references users.user_id)
+
+12. EXPENSES SHEET (add these columns)
+    - created_by (references users.user_id)
+    - updated_by (references users.user_id)
+
+REFERENCES SUMMARY:
+- All sheets now reference users.user_id for created_by and updated_by
+- employees.user_id references users.user_id
+- All existing references remain unchanged (client_id, employee_id, contract_id, etc.)
