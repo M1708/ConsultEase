@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from backend.src.database.core.database import get_db, engine, Base
-from backend.src.database.api import clients, contracts, client_contacts, deliverables, time_entries, expenses
+from backend.src.database.api import clients, contracts, client_contacts, deliverables, time_entries, expenses, chat
 
 
 # Create database tables
@@ -31,6 +31,7 @@ app.include_router(client_contacts.router, prefix="/api/client-contacts", tags=[
 app.include_router(deliverables.router, prefix="/api/deliverables", tags=["deliverables"])
 app.include_router(time_entries.router, prefix="/api/time-entries", tags=["time-entries"])
 app.include_router(expenses.router, prefix="/api/expenses", tags=["expenses"])
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 
 @app.get("/")
 def root():
