@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Optional
 from backend.src.aiagents.contract_agent import ContractAgent
 from backend.src.aiagents.time_agent import TimeTrackerAgent
+from backend.src.aiagents.deliverable_agent import DeliverableAgent
 from backend.src.aiagents.workflows.client_onboarding_workflow import ClientOnboardingWorkflow
 from backend.src.aiagents.workflows.base_workflow import WorkflowState, WorkflowStatus
 import uuid
@@ -11,7 +12,8 @@ class MultiAgentOrchestrator:
         # Initialize agents
         self.agents = {
             "contract": ContractAgent(),
-            "time": TimeTrackerAgent()
+            "time": TimeTrackerAgent(),
+            "deliverable": DeliverableAgent()
         }
         
         # Initialize workflows
@@ -48,10 +50,13 @@ class MultiAgentOrchestrator:
         message_lower = message.lower()
         
         # Agent selection logic
+        deliverable_keywords = ["deliverable", "project", "milestone", "task", "add deliverable", "create deliverable"]
         contract_keywords = ["client", "contract", "company", "agreement", "onboard"]
         time_keywords = ["time", "hours", "log", "timesheet", "productivity"]
         
-        if any(keyword in message_lower for keyword in contract_keywords):
+        if any(keyword in message_lower for keyword in deliverable_keywords):
+            return self.agents["deliverable"]
+        elif any(keyword in message_lower for keyword in contract_keywords):
             return self.agents["contract"]
         elif any(keyword in message_lower for keyword in time_keywords):
             return self.agents["time"]

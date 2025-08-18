@@ -38,8 +38,14 @@ class BaseWorkflow:
         """Execute the workflow"""
         try:
             app = self.graph.compile()
-            final_state = await app.ainvoke(initial_state)
-            return final_state
+            final_state_dict = await app.ainvoke(initial_state)
+            
+            # LangGraph returns a dictionary, convert back to WorkflowState
+            if isinstance(final_state_dict, dict):
+                return WorkflowState(**final_state_dict)
+            else:
+                return final_state_dict
+                
         except Exception as e:
             initial_state.status = WorkflowStatus.FAILED
             initial_state.error_message = str(e)

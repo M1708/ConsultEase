@@ -38,6 +38,85 @@ def get_deliverables_by_contract(contract_id: int, db: Session = Depends(get_db)
     """Get all deliverables for a specific contract"""
     return db.query(Deliverable).filter(Deliverable.contract_id == contract_id).all()
 
+@router.get("/search/{search_term}", response_model=List[DeliverableResponse])
+def search_deliverables(search_term: str, db: Session = Depends(get_db)):
+    """Search deliverables by name or description"""
+    return db.query(Deliverable).filter(
+        Deliverable.name.ilike(f"%{search_term}%") |
+        Deliverable.description.ilike(f"%{search_term}%")
+    ).all()
+
+def get_deliverable_by_name(deliverable_name: str, db: Session) -> Deliverable:
+    """Helper function to get deliverable by name (for use in tools) - with intelligent client name matching"""
+    from backend.src.database.core.models import Client, Contract
+    
+    # First try direct deliverable name match
+    deliverable = db.query(Deliverable).filter(Deliverable.name.ilike(f"%{deliverable_name}%")).first()
+    if deliverable:
+        return deliverable
+    
+    # If no direct match, try searching by client name
+    # This handles cases like "Solana project" matching "Solana Inc" client
+    search_words = deliverable_name.lower().split()
+    
+    deliverables = db.query(Deliverable).join(Contract).join(Client).all()
+    
+    for deliverable in deliverables:
+        client_name = deliverable.contract.client.client_name.lower()
+        deliverable_name_lower = (deliverable.name or "").lower()
+        
+        # Check if any search word matches client name or deliverable name
+        for word in search_words:
+            if (word in client_name or 
+                word in deliverable_name_lower or
+                # Check if client name contains the search word (e.g., "Solana" matches "Solana Inc")
+                any(word in client_word for client_word in client_name.split())):
+                return deliverable
+    
+    return None
+
+def search_deliverables_with_client_info(search_term: str, db: Session) -> List[dict]:
+    """Helper function to search deliverables with client and contract information"""
+    from backend.src.database.core.models import Client, Contract
+    
+    # More flexible search - split search term into words for better matching
+    search_words = search_term.lower().split()
+    
+    deliverables = db.query(Deliverable).join(Contract).join(Client).all()
+    
+    result = []
+    for deliverable in deliverables:
+        # Check if any search word matches client name, deliverable name, or description
+        client_name = deliverable.contract.client.client_name.lower()
+        deliverable_name = (deliverable.name or "").lower()
+        deliverable_desc = (deliverable.description or "").lower()
+        
+        # More intelligent matching
+        match_found = False
+        for word in search_words:
+            if (word in client_name or 
+                word in deliverable_name or 
+                word in deliverable_desc or
+                # Check if client name contains the search word (e.g., "Solana" matches "Solana Inc")
+                any(word in client_word for client_word in client_name.split())):
+                match_found = True
+                break
+        
+        if match_found:
+            result.append({
+                "deliverable_id": deliverable.deliverable_id,
+                "name": deliverable.name,
+                "description": deliverable.description,
+                "contract_id": deliverable.contract_id,
+                "client_id": deliverable.contract.client_id,
+                "client_name": deliverable.contract.client.client_name,
+                "status": deliverable.status,
+                "due_date": deliverable.due_date,
+                "billing_basis": deliverable.billing_basis
+            })
+    
+    return result
+
 @router.get("/{deliverable_id}", response_model=DeliverableResponse)
 def get_deliverable(deliverable_id: int, db: Session = Depends(get_db)):
     """Get a specific deliverable"""

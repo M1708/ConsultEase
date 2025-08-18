@@ -30,10 +30,11 @@ class ClientOnboardingWorkflow(BaseWorkflow):
     
     async def validate_client_info(self, state: WorkflowState) -> WorkflowState:
         """Validate client information"""
+        client_info = state.data.get("client_info", {})
         required_fields = ["client_name", "industry"]
         
         for field in required_fields:
-            if field not in state.data:
+            if field not in client_info:
                 state.status = WorkflowStatus.FAILED
                 state.error_message = f"Missing required field: {field}"
                 return state
@@ -47,9 +48,17 @@ class ClientOnboardingWorkflow(BaseWorkflow):
         try:
             client_info = state.data.get("client_info", {})
             
+            # Get database session from the workflow context if available
+            from backend.src.database.core.database import get_db
+            db = next(get_db())
+            
             result = await self.contract_agent.process_message(
                 f"Create a client with name '{client_info.get('client_name')}' in the {client_info.get('industry')} industry",
-                {"user_id": state.user_id, "session_id": state.session_id}
+                {
+                    "user_id": state.user_id, 
+                    "session_id": state.session_id,
+                    "database": db
+                }
             )
             
             if result["success"]:

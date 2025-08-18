@@ -1,95 +1,72 @@
 from openai import OpenAI
 from typing import Dict, Any, List, Callable
-from backend.src.aiagents.prompts import ContractAgentPrompts
-from backend.src.aiagents.tools.contract_tools import (
-    create_client_tool, search_clients_tool, analyze_contract_tool, 
-    smart_create_contract_tool, smart_contract_document_tool, get_contracts_by_client_tool,
-    CreateClientParams, SmartContractParams, ContractDocumentParams, ContractToolResult
+from backend.src.aiagents.prompts import DeliverablePrompts
+from backend.src.aiagents.tools.deliverable_tools import (
+    smart_create_deliverable_tool, get_deliverables_by_client_tool, 
+    get_deliverables_by_contract_tool, search_deliverables_tool,
+    SmartDeliverableParams, DeliverableToolResult
 )
 from backend.src.aiagents.guardrails.input_guardrails import input_sanitization_guardrail
 from backend.src.aiagents.guardrails.output_guardrails import output_validation_guardrail
 import json
 import os
 
-class ContractAgent:
+class DeliverableAgent:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.name = "ContractBot"
-        self.instructions = ContractAgentPrompts.SYSTEM_INSTRUCTIONS
+        self.name = "DeliverableBot"
+        self.instructions = DeliverablePrompts.SYSTEM_INSTRUCTIONS
         self.model = "gpt-4o-mini"
         
         # Dynamic tool mapping - no hardcoded if-else logic
         self.tool_functions = {
-            "create_client": self._create_client_wrapper,
-            "search_clients": self._search_clients_wrapper,
-            "analyze_contract": self._analyze_contract_wrapper,
-            "create_contract": self._smart_create_contract_wrapper,
-            "get_client_contracts": self._get_contracts_by_client_wrapper,
-            "manage_contract_document": self._smart_contract_document_wrapper
+            "create_deliverable": self._smart_create_deliverable_wrapper,
+            "get_client_deliverables": self._get_deliverables_by_client_wrapper,
+            "get_contract_deliverables": self._get_deliverables_by_contract_wrapper,
+            "search_deliverables": self._search_deliverables_wrapper
         }
         
         self.tools = self._get_tool_schemas()
     
-    def _create_client_wrapper(self, **kwargs) -> Dict[str, Any]:
-        """Wrapper for create_client_tool"""
+    def _smart_create_deliverable_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for smart_create_deliverable_tool"""
         db = kwargs.pop('db', None)
-        params = CreateClientParams(**kwargs)
-        result = create_client_tool(params, db)
+        params = SmartDeliverableParams(**kwargs)
+        result = smart_create_deliverable_tool(params, db)
         return {
             "success": result.success,
             "message": result.message,
             "data": result.data
         }
     
-    def _search_clients_wrapper(self, **kwargs) -> Dict[str, Any]:
-        """Wrapper for search_clients_tool"""
-        db = kwargs.pop('db', None)
-        search_term = kwargs.get("search_term")
-        limit = kwargs.get("limit", 10)
-        result = search_clients_tool(search_term, limit, db)
-        return {
-            "success": result.success,
-            "message": result.message,
-            "data": result.data
-        }
-    
-    def _analyze_contract_wrapper(self, **kwargs) -> Dict[str, Any]:
-        """Wrapper for analyze_contract_tool"""
-        contract_text = kwargs.get("contract_text")
-        result = analyze_contract_tool(contract_text)
-        return {
-            "success": result.success,
-            "message": result.message,
-            "data": result.data
-        }
-    
-    def _smart_create_contract_wrapper(self, **kwargs) -> Dict[str, Any]:
-        """Wrapper for smart_create_contract_tool"""
-        db = kwargs.pop('db', None)
-        params = SmartContractParams(**kwargs)
-        result = smart_create_contract_tool(params, db)
-        return {
-            "success": result.success,
-            "message": result.message,
-            "data": result.data
-        }
-    
-    def _get_contracts_by_client_wrapper(self, **kwargs) -> Dict[str, Any]:
-        """Wrapper for get_contracts_by_client_tool"""
+    def _get_deliverables_by_client_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for get_deliverables_by_client_tool"""
         db = kwargs.pop('db', None)
         client_name = kwargs.get("client_name")
-        result = get_contracts_by_client_tool(client_name, db)
+        result = get_deliverables_by_client_tool(client_name, db)
         return {
             "success": result.success,
             "message": result.message,
             "data": result.data
         }
     
-    def _smart_contract_document_wrapper(self, **kwargs) -> Dict[str, Any]:
-        """Wrapper for smart_contract_document_tool"""
+    def _get_deliverables_by_contract_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for get_deliverables_by_contract_tool"""
         db = kwargs.pop('db', None)
-        params = ContractDocumentParams(**kwargs)
-        result = smart_contract_document_tool(params, db)
+        client_name = kwargs.get("client_name")
+        contract_id = kwargs.get("contract_id")
+        result = get_deliverables_by_contract_tool(client_name, contract_id, db)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "data": result.data
+        }
+    
+    def _search_deliverables_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for search_deliverables_tool"""
+        db = kwargs.pop('db', None)
+        search_term = kwargs.get("search_term")
+        result = search_deliverables_tool(search_term, db)
         return {
             "success": result.success,
             "message": result.message,
@@ -102,34 +79,67 @@ class ContractAgent:
             {
                 "type": "function",
                 "function": {
-                    "name": "create_client",
-                    "description": "Create a new client record in the CRM system with company information",
+                    "name": "create_deliverable",
+                    "description": "Create a new deliverable for a client by client name - automatically finds contract and handles client resolution",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "client_name": {
                                 "type": "string",
-                                "description": "The full name of the client company or organization"
+                                "description": "Name of the client to create the deliverable for"
                             },
-                            "industry": {
+                            "deliverable_name": {
                                 "type": "string",
-                                "description": "The industry or business sector the client operates in"
+                                "description": "Name of the deliverable/project task"
                             },
-                            "primary_contact_name": {
+                            "description": {
                                 "type": "string",
-                                "description": "Name of the primary contact person at the client company"
+                                "description": "Detailed description of the deliverable (optional)"
                             },
-                            "primary_contact_email": {
-                                "type": "string",
-                                "description": "Email address of the primary contact person"
+                            "contract_id": {
+                                "type": "integer",
+                                "description": "Specific contract ID (optional - will use latest active contract if not provided)"
                             },
-                            "company_size": {
+                            "due_date": {
                                 "type": "string",
-                                "description": "Size of the company (e.g., Small, Medium, Large, Enterprise)"
+                                "description": "Due date in YYYY-MM-DD format (optional)"
                             },
-                            "notes": {
+                            "billing_basis": {
                                 "type": "string",
-                                "description": "Additional notes or comments about the client"
+                                "description": "Billing basis: Fixed, Hourly, or Milestone (optional, defaults to Fixed)"
+                            },
+                            "estimated_hours": {
+                                "type": "number",
+                                "description": "Estimated hours for completion (optional)"
+                            },
+                            "assigned_employees": {
+                                "type": "integer",
+                                "description": "Number of employees assigned to this deliverable (optional, defaults to 1)"
+                            },
+                            "assigned_employee_name": {
+                                "type": "string",
+                                "description": "Name of the assigned employee (optional)"
+                            },
+                            "billing_amount": {
+                                "type": "number",
+                                "description": "Total billing amount for this deliverable (optional)"
+                            }
+                        },
+                        "required": ["client_name", "deliverable_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_client_deliverables",
+                    "description": "Get all deliverables for a specific client by client name",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {
+                                "type": "string",
+                                "description": "Name of the client to get deliverables for"
                             }
                         },
                         "required": ["client_name"]
@@ -139,136 +149,51 @@ class ContractAgent:
             {
                 "type": "function",
                 "function": {
-                    "name": "search_clients",
-                    "description": "Search for existing clients in the database by name, industry, or other criteria",
+                    "name": "get_contract_deliverables",
+                    "description": "Get deliverables for a specific contract by client name and optional contract ID",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {
+                                "type": "string",
+                                "description": "Name of the client"
+                            },
+                            "contract_id": {
+                                "type": "integer",
+                                "description": "Specific contract ID (optional - will use latest contract if not provided)"
+                            }
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_deliverables",
+                    "description": "Search for deliverables by name, description, or client name",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "search_term": {
                                 "type": "string",
-                                "description": "Search term to find clients (can be company name, industry, or other keywords)"
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum number of results to return",
-                                "default": 10
+                                "description": "Search term to find deliverables"
                             }
                         },
-                        "required": []
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "analyze_contract",
-                    "description": "Analyze contract text to extract key terms, obligations, dates, and financial information",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "contract_text": {
-                                "type": "string",
-                                "description": "The full text content of the contract to analyze"
-                            }
-                        },
-                        "required": ["contract_text"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_contract",
-                    "description": "Create a new contract for a client by client name - automatically finds client_id",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "client_name": {
-                                "type": "string",
-                                "description": "Name of the client to create the contract for"
-                            },
-                            "contract_type": {
-                                "type": "string",
-                                "description": "Type of contract: Fixed, Hourly, or Retainer"
-                            },
-                            "original_amount": {
-                                "type": "number",
-                                "description": "Contract amount in dollars (optional)"
-                            },
-                            "start_date": {
-                                "type": "string",
-                                "description": "Contract start date in YYYY-MM-DD format (optional)"
-                            },
-                            "end_date": {
-                                "type": "string",
-                                "description": "Contract end date in YYYY-MM-DD format (optional)"
-                            },
-                            "billing_frequency": {
-                                "type": "string",
-                                "description": "Billing frequency: Monthly, Weekly, or One-time (optional)"
-                            },
-                            "notes": {
-                                "type": "string",
-                                "description": "Additional notes about the contract (optional)"
-                            }
-                        },
-                        "required": ["client_name", "contract_type"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_client_contracts",
-                    "description": "Get all contracts for a specific client by client name",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "client_name": {
-                                "type": "string",
-                                "description": "Name of the client to get contracts for"
-                            }
-                        },
-                        "required": ["client_name"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "manage_contract_document",
-                    "description": "Manage contract documents - get upload information or check document status",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "client_name": {
-                                "type": "string",
-                                "description": "Name of the client whose contract document to manage"
-                            },
-                            "contract_id": {
-                                "type": "integer",
-                                "description": "Specific contract ID (optional - will use latest contract if not provided)"
-                            },
-                            "document_action": {
-                                "type": "string",
-                                "description": "Action to perform: upload or update",
-                                "default": "upload"
-                            }
-                        },
-                        "required": ["client_name"]
+                        "required": ["search_term"]
                     }
                 }
             }
         ]
     
     async def process_message(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Process user message through ContractBot using OpenAI function calling"""
+        """Process user message through DeliverableBot using OpenAI function calling"""
         try:
             # Add context to message processing
             enhanced_context = {
                 **context,
-                "agent_type": "contract",
-                "capabilities": ["client_management", "contract_analysis", "document_processing"]
+                "agent_type": "deliverable",
+                "capabilities": ["deliverable_management", "project_tracking", "client_coordination"]
             }
             
             # Apply input guardrails
@@ -327,7 +252,7 @@ class ContractAgent:
                 validated_response = output_validation_guardrail(response_content)
                 
                 return {
-                    "agent": "ContractBot",
+                    "agent": "DeliverableBot",
                     "response": validated_response if isinstance(validated_response, str) else str(validated_response),
                     "success": True,
                     "data": tool_results[0] if tool_results and isinstance(tool_results[0], dict) and tool_results[0].get("data") else None
@@ -341,7 +266,7 @@ class ContractAgent:
                 validated_response = output_validation_guardrail(response_content)
                 
                 return {
-                    "agent": "ContractBot",
+                    "agent": "DeliverableBot",
                     "response": validated_response if isinstance(validated_response, str) else str(validated_response),
                     "success": True,
                     "data": None
@@ -349,7 +274,7 @@ class ContractAgent:
             
         except Exception as e:
             return {
-                "agent": "ContractBot",
+                "agent": "DeliverableBot",
                 "response": f"❌ Error processing request: {str(e)}",
                 "success": False
             }
@@ -393,14 +318,14 @@ class ContractAgent:
     def get_capabilities(self) -> Dict[str, Any]:
         """Return agent capabilities"""
         return {
-            "name": "ContractBot",
-            "description": "Client and contract management specialist",
+            "name": "DeliverableBot",
+            "description": "Project deliverable and milestone management specialist",
             "capabilities": [
-                "Create and manage client records",
-                "Process contract documents",
-                "Analyze contract terms and obligations",
-                "Track contract renewals and deadlines",
-                "Manage client relationships"
+                "Create and manage project deliverables",
+                "Track deliverable progress and status",
+                "Coordinate deliverable assignments",
+                "Monitor deadlines and milestones",
+                "Link deliverables to contracts and clients"
             ],
             "tools": list(self.tool_functions.keys())
         }

@@ -28,6 +28,18 @@ def get_clients(db: Session = Depends(get_db)):
     """Get all clients"""
     return db.query(Client).all()
 
+@router.get("/search/{search_term}", response_model=List[ClientResponse])
+def search_clients_by_name(search_term: str, db: Session = Depends(get_db)):
+    """Search clients by name or industry"""
+    return db.query(Client).filter(
+        Client.client_name.ilike(f"%{search_term}%") |
+        Client.industry.ilike(f"%{search_term}%")
+    ).all()
+
+def get_client_by_name(client_name: str, db: Session) -> Client:
+    """Helper function to get client by name (for use in tools)"""
+    return db.query(Client).filter(Client.client_name.ilike(f"%{client_name}%")).first()
+
 @router.get("/{client_id}", response_model=ClientWithContracts)
 def get_client(client_id: int, db: Session = Depends(get_db)):
     """Get a specific client with their contracts"""
