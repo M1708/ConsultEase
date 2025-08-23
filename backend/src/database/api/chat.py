@@ -5,8 +5,11 @@ from sqlalchemy.orm import Session
 from backend.src.database.core.database import get_db
 from backend.src.aiagents.agent_orchestrator import MultiAgentOrchestrator
 from datetime import datetime
+from backend.src.auth.dependencies import get_current_user, AuthenticatedUser
+from backend.src.auth.session_manager import SessionManager
 
 router = APIRouter()
+session_manager = SessionManager()
 
 class ChatMessage(BaseModel):
     message: str
@@ -30,27 +33,47 @@ class WorkflowStatusRequest(BaseModel):
 orchestrator = MultiAgentOrchestrator()
 
 @router.post("/message", response_model=ChatResponse)
-async def send_chat_message(chat: ChatMessage, db: Session = Depends(get_db)):
-    """Send a message to the multi-agent system"""
+async def send_chat_message(
+    chat: ChatMessage, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """Send a message to the multi-agent system with authentication"""
     try:
-        # Prepare context
+        # Use authenticated user's information
         context = {
-            "user_id": chat.user_id or "anonymous",
-            "session_id": chat.session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "user_id": str(current_user.user_id),
+            "session_id": current_user.session_id,
             "timestamp": datetime.now().isoformat(),
             "database": db,
+            "user_role": current_user.role,
+            "user_name": current_user.user.full_name or current_user.user.email,
             **(chat.context or {})
         }
         
         # Process through multi-agent orchestrator
         result = await orchestrator.process_message(chat.message, context)
         
+        # Store chat interaction in Redis for session persistence
+        chat_update = {
+            "last_message": chat.message,
+            "last_response": result["response"],
+            "last_agent": result["agent"],
+            "timestamp": context["timestamp"]
+        }
+        
+        await session_manager.store_chat_session(
+            current_user.session_id,
+            str(current_user.user_id),
+            chat_update
+        )
+        
         return ChatResponse(
             response=result["response"],
             agent=result["agent"],
             success=result["success"],
             timestamp=context["timestamp"],
-            session_id=context["session_id"],
+            session_id=current_user.session_id,
             workflow_id=result.get("workflow_id"),
             data=result.get("data")
         )

@@ -1,0 +1,37 @@
+"use client";
+
+import { createContext, useContext, useEffect, ReactNode } from "react";
+import { useAuthSession } from "@/hooks/useAuthSession";
+import { SessionData } from "@/lib/redis-session";
+
+interface SessionContextType {
+  sessionData: SessionData | null;
+  sessionLoading: boolean;
+  sessionError: string | null;
+  invalidateSession: () => Promise<void>;
+  hasValidSession: boolean;
+}
+
+const SessionContext = createContext<SessionContextType | undefined>(undefined);
+
+export const useSession = () => {
+  const context = useContext(SessionContext);
+  if (context === undefined) {
+    throw new Error("useSession must be used within a SessionProvider");
+  }
+  return context;
+};
+
+interface SessionProviderProps {
+  children: ReactNode;
+}
+
+export const SessionProvider = ({ children }: SessionProviderProps) => {
+  const sessionData = useAuthSession();
+
+  return (
+    <SessionContext.Provider value={sessionData}>
+      {children}
+    </SessionContext.Provider>
+  );
+};

@@ -1,0 +1,15 @@
+# Create Next.js project
+npx create-next-app@latest consultease-frontend --typescript --tailwind --eslint --app
+cd consultease-frontend
+
+# Install dependencies
+npm install lucide-react zustand clsx
+
+# Create directory structure
+mkdir -p src/components/{ui,auth,chat,sidebar,data-display,common}
+mkdir -p src/{lib,hooks,store,types,services,styles}
+mkdir -p src/app/\(auth\)/login
+mkdir -p src/app/\(chat\)/{history,workflows}
+
+# Create environment file
+cp .env.example .env.local

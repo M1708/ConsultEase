@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Date, Numeric, BigInteger, JSON, Boolean
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Date, Numeric, BigInteger, JSON, Boolean, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from backend.src.database.core.database import Base
+from enum import Enum
 
 class Client(Base):
     __tablename__ = "clients"
@@ -173,3 +174,40 @@ class Expense(Base):
     # Relationships
     client = relationship("Client")
     deliverable = relationship("Deliverable")
+
+class UserRole(str, Enum):
+    super_admin = "super_admin"
+    admin = "admin"
+    manager = "manager"
+    employee = "employee"
+    client = "client"
+    viewer = "viewer"
+
+class UserStatus(str, Enum):
+    active = "active"
+    inactive = "inactive"
+    suspended = "suspended"
+    pending = "pending"
+
+class User(Base):
+    __tablename__ = "profiles"
+    
+    user_id = Column("profile_id", UUID(as_uuid=True), primary_key=True)
+    email = Column(String, nullable=False)
+    first_name = Column(String)
+    last_name = Column(String)
+    role = Column(SQLEnum(UserRole), nullable=False, default="viewer")
+    status = Column(SQLEnum(UserStatus), nullable=False, default="active")
+    phone = Column(String)
+    last_login = Column(DateTime(timezone=True))
+    password_reset_required = Column("password_reset", Boolean, default=False)
+    two_factor_enabled = Column(Boolean, default=False)
+    preferences = Column(JSONB, default={})
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    @property
+    def full_name(self) -> str:
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        return self.first_name or self.last_name or self.email

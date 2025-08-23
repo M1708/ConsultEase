@@ -1,0 +1,8 @@
+# Core dependencies
+npm install @supabase/supabase-js zustand react-hook-form @hookform/resolvers zod lucide-react clsx tailwind-merge
+
+# Auth helper for middleware
+npm install @supabase/auth-helpers-nextjs
+
+# PostCSS and Tailwind dependencies
+npm install -D @tailwindcss/postcss postcss autoprefixer tailwindcss@3.4.0
