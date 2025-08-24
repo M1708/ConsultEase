@@ -7,6 +7,7 @@ from backend.src.database.core.database import get_db
 from backend.src.database.core.models import Expense, Client
 from backend.src.database.core.schemas import ExpenseCreate, ExpenseUpdate, ExpenseResponse, ExpenseDocumentResponse
 from backend.src.services.storage_service import SupabaseStorageService
+from backend.src.auth.dependencies import get_current_user, AuthenticatedUser
 
 
 router = APIRouter()
@@ -14,7 +15,8 @@ router = APIRouter()
 @router.post("/", response_model=ExpenseResponse)
 def create_expense(
     expense: ExpenseCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Create a new expense"""
     # Verify client exists
@@ -26,8 +28,31 @@ def create_expense(
         **expense.model_dump(),
         entered_by="system",
         entry_timestamp=func.now(),
-        created_by="00000000-0000-0000-0000-000000000000",
-        updated_by="00000000-0000-0000-0000-000000000000"
+        created_by=current_user.user_id,
+        updated_by=current_user.user_id
+    )
+    db.add(db_expense)
+    db.commit()
+    db.refresh(db_expense)
+    return db_expense
+
+def create_expense_internal(expense: ExpenseCreate, db: Session, user_id: str) -> Expense:
+    """Internal function to create expense (for use by AI agents and tools)"""
+    # AI agents must provide the actual user_id from the authenticated session
+    if not user_id:
+        raise ValueError("user_id is required for AI agent operations")
+    
+    # Verify client exists
+    client = db.query(Client).filter(Client.client_id == expense.client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    db_expense = Expense(
+        **expense.model_dump(),
+        entered_by="system",
+        entry_timestamp=func.now(),
+        created_by=user_id,
+        updated_by=user_id
     )
     db.add(db_expense)
     db.commit()
@@ -73,7 +98,8 @@ def get_expense(expense_id: int, db: Session = Depends(get_db)):
 def update_expense(
     expense_id: int,
     expense_update: ExpenseUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Update an expense"""
     db_expense = db.query(Expense).filter(Expense.expense_id == expense_id).first()
@@ -85,13 +111,19 @@ def update_expense(
     
     db_expense.last_modified_by = "system"
     db_expense.last_modified_timestamp = func.now()
-    db_expense.updated_by = "00000000-0000-0000-0000-000000000000"
+    # Set updated_by to current user
+    db_expense.updated_by = current_user.user_id
+    
     db.commit()
     db.refresh(db_expense)
     return db_expense
 
 @router.delete("/{expense_id}")
-def delete_expense(expense_id: int, db: Session = Depends(get_db)):
+def delete_expense(
+    expense_id: int, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """Delete an expense"""
     db_expense = db.query(Expense).filter(Expense.expense_id == expense_id).first()
     if not db_expense:
@@ -105,7 +137,8 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
 async def upload_expense_document(
     expense_id: int,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Upload a receipt/invoice document for an expense"""
     try:
@@ -149,9 +182,8 @@ async def upload_expense_document(
             expense.document_file_size = upload_result["file_size"]
             expense.document_mime_type = upload_result["mime_type"]
             expense.document_uploaded_at = upload_result["uploaded_at"]
-            expense.last_modified_by = "system"
+            expense.last_modified_by = current_user.user_id
             expense.last_modified_timestamp = func.now()
-            expense.updated_by = "00000000-0000-0000-0000-000000000000"
             
             db.commit()
             db.refresh(expense)
@@ -201,7 +233,11 @@ async def get_expense_document(expense_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to get document: {str(e)}")
 
 @router.delete("/{expense_id}/document")
-async def delete_expense_document(expense_id: int, db: Session = Depends(get_db)):
+async def delete_expense_document(
+    expense_id: int, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """Delete expense document"""
     try:
         expense = db.query(Expense).filter(Expense.expense_id == expense_id).first()
@@ -224,9 +260,8 @@ async def delete_expense_document(expense_id: int, db: Session = Depends(get_db)
             expense.document_uploaded_at = None
             expense.ocr_extracted_data = None
             expense.ai_analysis_data = None
-            expense.last_modified_by = "system"
+            expense.last_modified_by = current_user.user_id
             expense.last_modified_timestamp = func.now()
-            expense.updated_by = "00000000-0000-0000-0000-000000000000"
             
             db.commit()
             
@@ -238,7 +273,11 @@ async def delete_expense_document(expense_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
 
 @router.post("/{expense_id}/analyze-document")
-async def analyze_expense_document(expense_id: int, db: Session = Depends(get_db)):
+async def analyze_expense_document(
+    expense_id: int, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """Analyze uploaded expense document using OCR and AI"""
     try:
         expense = db.query(Expense).filter(Expense.expense_id == expense_id).first()
@@ -264,9 +303,8 @@ async def analyze_expense_document(expense_id: int, db: Session = Depends(get_db
         
         # Store analysis in database
         expense.ai_analysis_data = mock_analysis
-        expense.last_modified_by = "system"
+        expense.last_modified_by = current_user.user_id
         expense.last_modified_timestamp = func.now()
-        expense.updated_by = "00000000-0000-0000-0000-000000000000"
         
         db.commit()
         

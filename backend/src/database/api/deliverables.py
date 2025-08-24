@@ -2,15 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Deliverable, Contract
+from backend.src.database.core.models import Deliverable, Client, Contract
 from backend.src.database.core.schemas import DeliverableCreate, DeliverableUpdate, DeliverableResponse
+from backend.src.auth.dependencies import get_current_user, AuthenticatedUser
 
 router = APIRouter()
 
 @router.post("/", response_model=DeliverableResponse)
 def create_deliverable(
     deliverable: DeliverableCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Create a new deliverable"""
     # Verify contract exists
@@ -20,8 +22,29 @@ def create_deliverable(
     
     db_deliverable = Deliverable(
         **deliverable.model_dump(),
-        created_by="00000000-0000-0000-0000-000000000000",
-        updated_by="00000000-0000-0000-0000-000000000000"
+        created_by=current_user.user_id,
+        updated_by=current_user.user_id
+    )
+    db.add(db_deliverable)
+    db.commit()
+    db.refresh(db_deliverable)
+    return db_deliverable
+
+def create_deliverable_internal(deliverable: DeliverableCreate, db: Session, user_id: str) -> Deliverable:
+    """Internal function to create deliverable (for use by AI agents and tools)"""
+    # AI agents must provide the actual user_id from the authenticated session
+    if not user_id:
+        raise ValueError("user_id is required for AI agent operations")
+    
+    # Verify contract exists
+    contract = db.query(Contract).filter(Contract.contract_id == deliverable.contract_id).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    db_deliverable = Deliverable(
+        **deliverable.model_dump(),
+        created_by=user_id,
+        updated_by=user_id
     )
     db.add(db_deliverable)
     db.commit()
@@ -129,23 +152,30 @@ def get_deliverable(deliverable_id: int, db: Session = Depends(get_db)):
 def update_deliverable(
     deliverable_id: int,
     deliverable_update: DeliverableUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Update a deliverable"""
     db_deliverable = db.query(Deliverable).filter(Deliverable.deliverable_id == deliverable_id).first()
     if not db_deliverable:
         raise HTTPException(status_code=404, detail="Deliverable not found")
     
-    for field, value in deliverable_update.dict(exclude_unset=True).items():
+    for field, value in deliverable_update.model_dump(exclude_unset=True).items():
         setattr(db_deliverable, field, value)
     
-    db_deliverable.updated_by = "00000000-0000-0000-0000-000000000000"
+    # Set updated_by to current user
+    db_deliverable.updated_by = current_user.user_id
+    
     db.commit()
     db.refresh(db_deliverable)
     return db_deliverable
 
 @router.delete("/{deliverable_id}")
-def delete_deliverable(deliverable_id: int, db: Session = Depends(get_db)):
+def delete_deliverable(
+    deliverable_id: int, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """Delete a deliverable"""
     db_deliverable = db.query(Deliverable).filter(Deliverable.deliverable_id == deliverable_id).first()
     if not db_deliverable:

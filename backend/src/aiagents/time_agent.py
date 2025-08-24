@@ -318,6 +318,9 @@ class TimeTrackerAgent:
             db = context.get("database")
             function_args['db'] = db
             
+            # Add context to function args for tools that need user_id
+            function_args['context'] = context
+            
             # Dynamically call the appropriate tool function
             if function_name in self.tool_functions:
                 return self.tool_functions[function_name](**function_args)

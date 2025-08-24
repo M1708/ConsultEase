@@ -31,8 +31,9 @@ class DeliverableAgent:
     def _smart_create_deliverable_wrapper(self, **kwargs) -> Dict[str, Any]:
         """Wrapper for smart_create_deliverable_tool"""
         db = kwargs.pop('db', None)
+        context = kwargs.pop('context', None)
         params = SmartDeliverableParams(**kwargs)
-        result = smart_create_deliverable_tool(params, db)
+        result = smart_create_deliverable_tool(params, context, db)
         return {
             "success": result.success,
             "message": result.message,
@@ -297,6 +298,9 @@ class DeliverableAgent:
             # Get the database session from context
             db = context.get("database")
             function_args['db'] = db
+            
+            # Add context to function args for tools that need user_id
+            function_args['context'] = context
             
             # Dynamically call the appropriate tool function
             if function_name in self.tool_functions:

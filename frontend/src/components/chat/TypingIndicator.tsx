@@ -1,3 +1,5 @@
+import { Bot } from "lucide-react";
+
 export const TypingIndicator = () => {
   return (
     <div className="flex gap-3 mb-4">

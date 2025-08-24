@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 from backend.src.database.core.database import get_db
 from backend.src.database.core.models import Contract, Client
-from backend.src.database.core.schemas import ContractCreate, ContractResponse, ContractDocumentResponse
+from backend.src.database.core.schemas import ContractCreate, ContractUpdate, ContractResponse, ContractDocumentResponse
 from backend.src.services.storage_service import SupabaseStorageService
+from backend.src.auth.dependencies import get_current_user, AuthenticatedUser
 
 router = APIRouter()
 
@@ -12,7 +13,8 @@ router = APIRouter()
 async def upload_contract_document(
     contract_id: int,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Upload a document for a contract"""
     try:
@@ -57,7 +59,7 @@ async def upload_contract_document(
             contract.document_file_size = upload_result.get("file_size")
             contract.document_mime_type = upload_result.get("mime_type")
             contract.document_uploaded_at = upload_result.get("uploaded_at")
-            contract.updated_by = "00000000-0000-0000-0000-000000000000"  # Update with actual user
+            contract.updated_by = current_user.user_id
             
             db.commit()
             db.refresh(contract)
@@ -108,7 +110,11 @@ async def get_contract_document(contract_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail=f"Failed to get document: {str(e)}")
 
 @router.delete("/{contract_id}/document")
-async def delete_contract_document(contract_id: int, db: Session = Depends(get_db)):
+async def delete_contract_document(
+    contract_id: int, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """Delete contract document"""
     try:
         contract = db.query(Contract).filter(Contract.contract_id == contract_id).first()
@@ -129,7 +135,7 @@ async def delete_contract_document(contract_id: int, db: Session = Depends(get_d
             contract.document_file_size = None
             contract.document_mime_type = None
             contract.document_uploaded_at = None
-            contract.updated_by = "00000000-0000-0000-0000-000000000000"  # Update with actual user
+            contract.updated_by = current_user.user_id
             
             db.commit()
             
@@ -143,7 +149,8 @@ async def delete_contract_document(contract_id: int, db: Session = Depends(get_d
 @router.post("/", response_model=ContractResponse)
 def create_contract(
     contract: ContractCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Create a new contract"""
     # Verify client exists
@@ -153,8 +160,29 @@ def create_contract(
     
     db_contract = Contract(
         **contract.model_dump(),
-        created_by="00000000-0000-0000-0000-000000000000",
-        updated_by="00000000-0000-0000-0000-000000000000"
+        created_by=current_user.user_id,
+        updated_by=current_user.user_id
+    )
+    db.add(db_contract)
+    db.commit()
+    db.refresh(db_contract)
+    return db_contract
+
+def create_contract_internal(contract: ContractCreate, db: Session, user_id: str) -> Contract:
+    """Internal function to create contract (for use by AI agents and tools)"""
+    # AI agents must provide the actual user_id from the authenticated session
+    if not user_id:
+        raise ValueError("user_id is required for AI agent operations")
+    
+    # Verify client exists
+    client = db.query(Client).filter(Client.client_id == contract.client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    db_contract = Contract(
+        **contract.model_dump(),
+        created_by=user_id,
+        updated_by=user_id
     )
     db.add(db_contract)
     db.commit()
@@ -183,7 +211,8 @@ def get_contract(contract_id: int, db: Session = Depends(get_db)):
 def update_contract(
     contract_id: int,
     contract_update: ContractCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Update a contract"""
     db_contract = db.query(Contract).filter(Contract.contract_id == contract_id).first()
@@ -191,16 +220,22 @@ def update_contract(
         raise HTTPException(status_code=404, detail="Contract not found")
     
     # Update fields
-    for field, value in contract_update.dict(exclude_unset=True).items():
+    for field, value in contract_update.model_dump(exclude_unset=True).items():
         setattr(db_contract, field, value)
     
-    db_contract.updated_by = "00000000-0000-0000-0000-000000000000"
+    # Set updated_by to current user
+    db_contract.updated_by = current_user.user_id
+    
     db.commit()
     db.refresh(db_contract)
     return db_contract
 
 @router.delete("/{contract_id}")
-def delete_contract(contract_id: int, db: Session = Depends(get_db)):
+def delete_contract(
+    contract_id: int, 
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
     """Delete a contract"""
     db_contract = db.query(Contract).filter(Contract.contract_id == contract_id).first()
     if not db_contract:
@@ -233,7 +268,8 @@ def get_upcoming_billing(db: Session = Depends(get_db)):
 def update_contract_status(
     contract_id: int,
     status: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Update contract status specifically"""
     valid_statuses = ["draft", "active", "completed", "terminated"]
@@ -248,7 +284,7 @@ def update_contract_status(
         raise HTTPException(status_code=404, detail="Contract not found")
     
     db_contract.status = status
-    db_contract.updated_by = "00000000-0000-0000-0000-000000000000"
+    db_contract.updated_by = current_user.user_id
     
     # If terminating, set termination date
     if status == "terminated":

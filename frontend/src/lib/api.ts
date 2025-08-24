@@ -1,5 +1,5 @@
 import { User } from "@/types/user";
-import { SendMessageRequest, AgentCapabilities } from "@/types/chat";
+import { SendMessageRequest, AgentCapabilities, ChatResponse } from "@/types/chat";
 import { supabase } from "./supabase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -65,8 +65,8 @@ class ApiClient {
 
   // Chat API
   chat = {
-    sendMessage: async (request: SendMessageRequest) => {
-      return this.request("/api/chat/message", {
+    sendMessage: async (request: SendMessageRequest): Promise<ChatResponse> => {
+      return this.request<ChatResponse>("/api/chat/message", {
         method: "POST",
         body: JSON.stringify(request),
       });

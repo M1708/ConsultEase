@@ -26,28 +26,37 @@ class MultiAgentOrchestrator:
     
     async def process_message(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Main entry point for processing user messages"""
+        print(f"🎯 AgentOrchestrator: Processing message: {message}")
         
         # Check if message is workflow-related
         workflow_result = await self._check_workflow_intent(message, context)
         if workflow_result:
+            print(f"🎯 AgentOrchestrator: Workflow result returned: {workflow_result}")
             return workflow_result
         
         # Route to appropriate agent
         selected_agent = self._select_agent(message, context)
+        print(f"🎯 AgentOrchestrator: Selected agent: {selected_agent.__class__.__name__ if selected_agent else 'None'}")
         
         if selected_agent:
-            return await selected_agent.process_message(message, context)
+            print(f"🎯 AgentOrchestrator: Calling agent.process_message")
+            result = await selected_agent.process_message(message, context)
+            print(f"🎯 AgentOrchestrator: Agent result: {result}")
+            return result
         
         # Fallback response
-        return {
+        fallback_result = {
             "agent": "System",
             "response": "I can help you with client management, time tracking, and project coordination. How can I assist you today?",
             "success": True
         }
+        print(f"🎯 AgentOrchestrator: Returning fallback result: {fallback_result}")
+        return fallback_result
     
     def _select_agent(self, message: str, context: Dict[str, Any]) -> Optional[Any]:
         """Select the most appropriate agent for the message"""
         message_lower = message.lower()
+        print(f"🎯 AgentOrchestrator._select_agent: Message: {message_lower}")
         
         # Agent selection logic
         deliverable_keywords = ["deliverable", "project", "milestone", "task", "add deliverable", "create deliverable"]
@@ -55,100 +64,24 @@ class MultiAgentOrchestrator:
         time_keywords = ["time", "hours", "log", "timesheet", "productivity"]
         
         if any(keyword in message_lower for keyword in deliverable_keywords):
+            print(f"🎯 AgentOrchestrator._select_agent: Selected deliverable agent")
             return self.agents["deliverable"]
         elif any(keyword in message_lower for keyword in contract_keywords):
+            print(f"🎯 AgentOrchestrator._select_agent: Selected contract agent")
             return self.agents["contract"]
         elif any(keyword in message_lower for keyword in time_keywords):
+            print(f"🎯 AgentOrchestrator._select_agent: Selected time agent")
             return self.agents["time"]
         
         # Default to contract agent for general queries
+        print(f"🎯 AgentOrchestrator._select_agent: Defaulting to contract agent")
         return self.agents["contract"]
     
     async def _check_workflow_intent(self, message: str, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Check if message should trigger a workflow"""
-        message_lower = message.lower()
-        
-        # Client onboarding workflow triggers
-        onboarding_triggers = ["onboard new client", "add new client company", "client setup"]
-        
-        if any(trigger in message_lower for trigger in onboarding_triggers):
-            return await self._start_client_onboarding_workflow(message, context)
-        
+        """Check if message should trigger a workflow - simplified to let agents handle most cases"""
+        # For now, let individual agents handle client creation directly
+        # Workflows can be added later for complex multi-step processes
         return None
-    
-    async def _start_client_onboarding_workflow(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Start client onboarding workflow"""
-        try:
-            # Create workflow state
-            workflow_state = WorkflowState(
-                workflow_id=str(uuid.uuid4()),
-                user_id=context.get("user_id", "anonymous"),
-                session_id=context.get("session_id", "default"),
-                status=WorkflowStatus.IN_PROGRESS,
-                current_step="validate_client_info",
-                data={"client_info": self._extract_client_info_from_message(message)},
-                created_at=datetime.now().isoformat(),
-                updated_at=datetime.now().isoformat()
-            )
-            
-            # Store workflow
-            self.active_workflows[workflow_state.workflow_id] = workflow_state
-            
-            # Execute workflow
-            workflow = self.workflows["client_onboarding"]
-            final_state = await workflow.execute(workflow_state)
-            
-            # Update stored workflow
-            self.active_workflows[workflow_state.workflow_id] = final_state
-            
-            if final_state.status == WorkflowStatus.COMPLETED:
-                return {
-                    "agent": "WorkflowManager",
-                    "response": f"✅ Client onboarding completed successfully! Client ID: {final_state.data.get('client_id')}",
-                    "success": True,
-                    "workflow_id": final_state.workflow_id,
-                    "data": final_state.data.get("onboarding_summary")
-                }
-            else:
-                return {
-                    "agent": "WorkflowManager",
-                    "response": f"⚠️ Workflow failed: {final_state.error_message}",
-                    "success": False,
-                    "workflow_id": final_state.workflow_id
-                }
-                
-        except Exception as e:
-            return {
-                "agent": "WorkflowManager",
-                "response": f"❌ Failed to start onboarding workflow: {str(e)}",
-                "success": False
-            }
-    
-    def _extract_client_info_from_message(self, message: str) -> Dict[str, Any]:
-        """Extract client information from user message"""
-        # Simple extraction logic (can be enhanced with NLP)
-        client_info = {}
-        
-        # Extract client name (look for patterns like "client called X" or "company named Y")
-        import re
-        name_patterns = [
-            r'client (?:called|named) ([^,\s]+(?:\s+[^,\s]+)*)',
-            r'company (?:called|named) ([^,\s]+(?:\s+[^,\s]+)*)',
-            r'onboard ([^,\s]+(?:\s+[^,\s]+)*)'
-        ]
-        
-        for pattern in name_patterns:
-            match = re.search(pattern, message, re.IGNORECASE)
-            if match:
-                client_info["client_name"] = match.group(1).strip()
-                break
-        
-        # Extract industry (look for "in the X industry" patterns)
-        industry_match = re.search(r'in the ([^,\s]+(?:\s+[^,\s]+)*) industry', message, re.IGNORECASE)
-        if industry_match:
-            client_info["industry"] = industry_match.group(1).strip()
-        
-        return client_info
     
     def get_agent_capabilities(self) -> Dict[str, Any]:
         """Get capabilities of all agents"""

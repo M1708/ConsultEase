@@ -25,36 +25,25 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       //console.log("A. Starting login process");
       set({ loading: true, error: null });
 
-      //console.log("B. Calling direct auth API");
+      //console.log("B. Calling Supabase auth");
 
-      // Use direct API call instead of Supabase client
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/token?grant_type=password`,
-        {
-          method: "POST",
-          headers: {
-            apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email,
-            password,
-          }),
-        }
-      );
+      // Use Supabase client for proper session management
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      const authData = await response.json();
-      //console.log("C. Direct auth response:", authData);
-
-      if (!response.ok || authData.error) {
-        throw new Error(authData.error?.message || "Authentication failed");
+      if (authError) {
+        throw new Error(authError.message || "Authentication failed");
       }
 
-      if (!authData.user || !authData.access_token) {
-        throw new Error("No user or token returned from authentication");
+      if (!authData.user || !authData.session) {
+        throw new Error("No user or session returned from authentication");
       }
 
-      localStorage.setItem("supabase_token", authData.access_token);
+      localStorage.setItem("supabase_token", authData.session.access_token);
+
+      console.log("Supabase auth successful, session created automatically");
 
       //console.log("D. Getting user profile from backend");
       const userData = await authApi.getUserProfile(authData.user.id);
@@ -68,17 +57,19 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         error: null,
       });
 
-      console.log("F2. Getting Redis session");
-      const sessionData = await redisSessionManager.getSession(
-        authData.access_token
-      );
-      if (sessionData) {
-        console.log("F3. Setting session ID:", sessionData.sessionId);
-        set((state) => ({ ...state, sessionId: sessionData.sessionId }));
-      }
-
-      //console.log("G. Updating last login");
-      await authApi.updateLastLogin(userData.user_id);
+      // Run session and last login updates in parallel (non-blocking)
+      Promise.all([
+        redisSessionManager.getSession(authData.session.access_token).then(sessionData => {
+          if (sessionData) {
+            console.log("F3. Setting session ID:", sessionData.sessionId);
+            set((state) => ({ ...state, sessionId: sessionData.sessionId }));
+          }
+        }),
+        authApi.updateLastLogin(userData.user_id)
+      ]).catch(error => {
+        console.warn("Non-critical post-login operations failed:", error);
+        // Don't fail the login for these secondary operations
+      });
       //console.log("H. Login process complete");
     } catch (error) {
       //console.log("Z. Login error caught:", error);
@@ -97,21 +88,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       set({ loading: true });
 
-      // Get token from localStorage (since we're using direct API)
+      // Get token from localStorage
       const token = localStorage.getItem("supabase_token");
 
-      // Invalidate Redis session
-      if (token) {
-        console.log("Invalidating Redis session");
-        await redisSessionManager.invalidateSession(token);
-      }
-
-      // Clear localStorage
+      // Clear localStorage immediately for faster UI response
       localStorage.removeItem("supabase_token");
 
-      // Note: Skip Supabase signOut since we used direct API
-      // const { error } = await supabase.auth.signOut();
-
+      // Update UI state immediately for instant feedback
       set({
         isAuthenticated: false,
         user: null,
@@ -119,6 +102,23 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         loading: false,
         error: null,
       });
+
+      // Run cleanup operations in parallel (non-blocking)
+      Promise.all([
+        // Invalidate Redis session (non-blocking)
+        token ? redisSessionManager.invalidateSession(token).catch(err => 
+          console.warn("Redis session invalidation failed:", err)
+        ) : Promise.resolve(),
+        
+        // Clear Supabase session (non-blocking)
+        supabase.auth.signOut().catch(err => 
+          console.warn("Supabase signOut failed:", err)
+        )
+      ]).catch(error => {
+        console.warn("Non-critical logout cleanup failed:", error);
+        // Don't fail the logout for these secondary operations
+      });
+
     } catch (error) {
       console.error("Logout failed:", error);
       set({ loading: false });
@@ -129,10 +129,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       console.log("INIT: Starting initialization");
 
-      // Skip initialization if already authenticated
+      // Skip initialization if already authenticated or already loading
       const currentState = get();
       if (currentState.isAuthenticated && currentState.user) {
         console.log("INIT: Already authenticated, skipping");
+        return;
+      }
+      
+      if (currentState.loading) {
+        console.log("INIT: Already loading, skipping");
         return;
       }
 

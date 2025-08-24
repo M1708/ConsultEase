@@ -26,11 +26,20 @@ class SmartDeliverableParams(BaseModel):
     assigned_employee_name: Optional[str] = None
     billing_amount: Optional[Decimal] = None
 
-def smart_create_deliverable_tool(params: SmartDeliverableParams, db: Session = None) -> DeliverableToolResult:
+def smart_create_deliverable_tool(params: SmartDeliverableParams, context: Dict[str, Any] = None, db: Session = None) -> DeliverableToolResult:
     """Smart tool for creating deliverables by client name and contract reference"""
     try:
         if db is None:
             db = next(get_db())
+        
+        # Extract user_id from context
+        if not context or 'user_id' not in context:
+            return DeliverableToolResult(
+                success=False,
+                message="❌ User context not available. Please ensure you're authenticated."
+            )
+        
+        user_id = context['user_id']
         
         contract = None
         

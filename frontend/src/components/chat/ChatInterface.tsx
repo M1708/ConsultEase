@@ -115,11 +115,11 @@ export const ChatInterface = () => {
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6 mb-6">
               <div className="text-center mb-4">
                 <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  Welcome, {user.first_name || user.email}!
+                  Welcome, {user.full_name || user.email}!
                 </h2>
                 <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  {user.role.replace("_", " ").toUpperCase()} •{" "}
-                  {user.status.toUpperCase()}
+                  {user.role.replace("_", " ").toUpperCase()}
+                  {user.status && ` • ${user.status.toUpperCase()}`}
                 </div>
               </div>
 

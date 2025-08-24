@@ -6,8 +6,8 @@ from decimal import Decimal
 from backend.src.database.core.database import get_db
 from backend.src.database.core.models import Client, Contract, ClientContact
 from backend.src.database.core.schemas import ClientCreate, ContractCreate, ClientContactCreate
-from backend.src.database.api.clients import create_client, get_client_by_name
-from backend.src.database.api.contracts import create_contract
+from backend.src.database.api.clients import create_client_internal, get_client_by_name
+from backend.src.database.api.contracts import create_contract_internal
 from backend.src.database.api.client_contacts import create_client_contact
 
 class CreateClientParams(BaseModel):
@@ -24,14 +24,24 @@ class ContractToolResult(BaseModel):
     data: Optional[Dict[str, Any]] = None
     requires_confirmation: bool = False
 
-def create_client_tool(params: CreateClientParams, db: Session = None) -> ContractToolResult:
+def create_client_tool(params: CreateClientParams, context: Dict[str, Any] = None, db: Session = None) -> ContractToolResult:
     """Tool for creating new clients"""
     try:
         if db is None:
             db = next(get_db())
         
-        client_data = ClientCreate(**params.dict())
-        result = create_client(client_data, db)
+        # Use model_dump() for Pydantic v2 compatibility
+        client_data = ClientCreate(**params.model_dump())
+        
+        # Extract user_id from context
+        if not context or 'user_id' not in context:
+            return ContractToolResult(
+                success=False,
+                message="❌ User context not available. Please ensure you're authenticated."
+            )
+        
+        user_id = context['user_id']
+        result = create_client_internal(client_data, db, user_id)
         
         return ContractToolResult(
             success=True,
@@ -42,11 +52,17 @@ def create_client_tool(params: CreateClientParams, db: Session = None) -> Contra
                 "industry": result.industry
             }
         )
+        
     except Exception as e:
-        return ContractToolResult(
+        print(f"🛠️ create_client_tool: Exception occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        error_result = ContractToolResult(
             success=False,
             message=f"❌ Failed to create client: {str(e)}"
         )
+        print(f"🛠️ create_client_tool: Returning error result: {error_result}")
+        return error_result
 
 def search_clients_tool(search_term: Optional[str] = None, limit: int = 10, db: Session = None) -> ContractToolResult:
     """Tool for searching existing clients"""
@@ -130,23 +146,45 @@ class SmartContractParams(BaseModel):
     billing_frequency: Optional[str] = None  # "Monthly", "Weekly", "One-time"
     notes: Optional[str] = None
 
-def smart_create_contract_tool(params: SmartContractParams, db: Session = None) -> ContractToolResult:
+def smart_create_contract_tool(params: SmartContractParams, context: Dict[str, Any] = None, db: Session = None) -> ContractToolResult:
     """Smart tool for creating contracts by client name instead of client_id"""
     try:
+        print(f"🔍 smart_create_contract_tool: Starting contract creation for client: {params.client_name}")
+        
         if db is None:
             db = next(get_db())
         
-        # Search for clients that match the client name - more precise matching
-        matching_clients = []
+        # Extract user_id from context
+        if not context or 'user_id' not in context:
+            return ContractToolResult(
+                success=False,
+                message="❌ User context not available. Please ensure you're authenticated."
+            )
         
-        all_clients = db.query(Client).all()
-        for client in all_clients:
+        user_id = context['user_id']
+        print(f"🔍 smart_create_contract_tool: Using user_id: {user_id}")
+        
+        # Search for clients that match the client name - more precise matching
+        # First refresh the session to ensure we see any recently created clients
+        db.flush()  # Ensure any pending changes are written
+        
+        matching_clients = []
+        search_name_lower = params.client_name.lower()
+        
+        # Optimized query - search by name pattern instead of loading all clients
+        search_pattern = f"%{params.client_name}%"
+        potential_clients = db.query(Client).filter(
+            Client.client_name.ilike(search_pattern)
+        ).limit(10).all()  # Limit to 10 most likely matches
+        
+        for client in potential_clients:
             client_name_lower = client.client_name.lower()
-            search_name_lower = params.client_name.lower()
+            print(f"🔍 smart_create_contract_tool: Checking client: '{client.client_name}' (id: {client.client_id})")
             
             # Exact match first
             if client_name_lower == search_name_lower:
                 matching_clients = [client]  # Exact match takes priority
+                print(f"🔍 smart_create_contract_tool: Found exact match: {client.client_name}")
                 break
             
             # Partial match - but more restrictive
@@ -156,89 +194,16 @@ def smart_create_contract_tool(params: SmartContractParams, db: Session = None) 
                 # Check if major words match (length > 3 to avoid matching short words like "Inc")
                 any(word in client_name_lower for word in search_name_lower.split() if len(word) > 3)):
                 matching_clients.append(client)
+                print(f"🔍 smart_create_contract_tool: Found partial match: {client.client_name}")
+        
+        print(f"🔍 smart_create_contract_tool: Total matching clients found: {len(matching_clients)}")
         
         if len(matching_clients) == 0:
-            # Client not found - automatically create new client
-            # Extract any industry information from the contract context
-            industry = None
-            if "tech" in params.client_name.lower():
-                industry = "Technology"
-            elif "corp" in params.client_name.lower():
-                industry = "Corporate"
-            elif "inc" in params.client_name.lower():
-                industry = "Business Services"
-            
-            # Create new client automatically
-            try:
-                client_data = CreateClientParams(
-                    client_name=params.client_name,
-                    industry=industry,
-                    notes=f"Auto-created during contract creation for {params.contract_type} contract"
-                )
-                
-                client_result = create_client_tool(client_data, db)
-                
-                if not client_result.success:
-                    return ContractToolResult(
-                        success=False,
-                        message=f"❌ Failed to create new client '{params.client_name}': {client_result.message}"
-                    )
-                
-                # Use the newly created client
-                new_client_id = client_result.data["client_id"]
-                client_name = client_result.data["client_name"]
-                
-                # Continue with contract creation using the new client
-                # Parse dates
-                start_date_obj = None
-                end_date_obj = None
-                
-                if params.start_date:
-                    try:
-                        start_date_obj = date.fromisoformat(params.start_date)
-                    except ValueError:
-                        start_date_obj = date.today()
-                
-                if params.end_date:
-                    try:
-                        end_date_obj = date.fromisoformat(params.end_date)
-                    except ValueError:
-                        pass
-                
-                # Create contract using the existing API
-                contract_data = ContractCreate(
-                    client_id=new_client_id,
-                    contract_type=params.contract_type,
-                    start_date=start_date_obj,
-                    end_date=end_date_obj,
-                    original_amount=params.original_amount,
-                    current_amount=params.original_amount,
-                    billing_frequency=params.billing_frequency,
-                    status="draft",
-                    notes=params.notes
-                )
-                
-                contract_result = create_contract(contract_data, db)
-                
-                return ContractToolResult(
-                    success=True,
-                    message=f"✅ New client '{client_name}' created and contract created successfully (Contract ID: {contract_result.contract_id}). Note: Please update client details like contact information and industry if needed.",
-                    data={
-                        "contract_id": contract_result.contract_id,
-                        "client_id": new_client_id,
-                        "client_name": client_name,
-                        "contract_type": contract_result.contract_type,
-                        "status": contract_result.status,
-                        "original_amount": float(contract_result.original_amount) if contract_result.original_amount else None,
-                        "new_client_created": True
-                    }
-                )
-                
-            except Exception as e:
-                return ContractToolResult(
-                    success=False,
-                    message=f"❌ Failed to create client and contract: {str(e)}"
-                )
+            # Client not found - return error asking agent to create client first
+            return ContractToolResult(
+                success=False,
+                message=f"❌ Client '{params.client_name}' not found. Please create the client first using the create_client function, then create the contract."
+            )
         
         elif len(matching_clients) > 1:
             # Multiple clients found - ask user to clarify
@@ -290,7 +255,7 @@ def smart_create_contract_tool(params: SmartContractParams, db: Session = None) 
             notes=params.notes
         )
         
-        result = create_contract(contract_data, db)
+        result = create_contract_internal(contract_data, db, user_id)
         
         return ContractToolResult(
             success=True,
@@ -417,4 +382,207 @@ def get_contracts_by_client_tool(client_name: str, db: Session = None) -> Contra
         return ContractToolResult(
             success=False,
             message=f"❌ Failed to get contracts: {str(e)}"
+        )
+
+def get_all_contracts_tool(db: Session = None) -> ContractToolResult:
+    """Tool for getting all contracts across all clients"""
+    try:
+        if db is None:
+            db = next(get_db())
+        
+        # Get all contracts with client information
+        contracts = db.query(Contract).join(Client).order_by(Contract.created_at.desc()).all()
+        
+        contract_list = []
+        for contract in contracts:
+            contract_list.append({
+                "contract_id": contract.contract_id,
+                "client_name": contract.client.client_name,
+                "contract_type": contract.contract_type,
+                "status": contract.status,
+                "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                "start_date": str(contract.start_date) if contract.start_date else None,
+                "end_date": str(contract.end_date) if contract.end_date else None,
+                "has_document": bool(contract.document_filename),
+                "document_filename": contract.document_filename
+            })
+        
+        return ContractToolResult(
+            success=True,
+            message=f"📋 Found {len(contract_list)} contracts across all clients",
+            data={
+                "contracts": contract_list,
+                "count": len(contract_list),
+                "total_clients": len(set(c["client_name"] for c in contract_list))
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to get all contracts: {str(e)}"
+        )
+
+class UpdateContractParams(BaseModel):
+    client_name: str
+    contract_id: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    contract_type: Optional[str] = None
+    original_amount: Optional[float] = None
+    billing_frequency: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] = None, db: Session = None) -> ContractToolResult:
+    """Tool for updating existing contracts by client name"""
+    try:
+        from datetime import datetime
+        
+        # Always create a fresh database session to avoid session closure issues
+        db = next(get_db())
+        print(f"🔧 update_contract_tool: Created fresh database session")
+        print(f"🔧 update_contract_tool: Database session info - is_active: {db.is_active}")
+        
+        # Test database connection
+        try:
+            db.execute("SELECT 1")
+            print(f"🔧 update_contract_tool: Database connection test successful")
+        except Exception as conn_error:
+            print(f"🔧 update_contract_tool: Database connection test failed: {conn_error}")
+            return ContractToolResult(
+                success=False,
+                message=f"❌ Database connection failed: {str(conn_error)}"
+            )
+        
+        # Extract user_id from context
+        if not context or 'user_id' not in context:
+            return ContractToolResult(
+                success=False,
+                message="❌ User context not available. Please ensure you're authenticated."
+            )
+        
+        user_id = context['user_id']
+        
+        # Find client by name
+        client = get_client_by_name(params.client_name, db)
+        if not client:
+            return ContractToolResult(
+                success=False,
+                message=f"❌ Client '{params.client_name}' not found."
+            )
+        
+        # Find the contract to update
+        contract = None
+        if params.contract_id:
+            # Use specific contract ID
+            contract = db.query(Contract).filter(
+                Contract.contract_id == params.contract_id,
+                Contract.client_id == client.client_id
+            ).first()
+        else:
+            # Get the most recent contract for this client
+            contract = db.query(Contract).filter(
+                Contract.client_id == client.client_id
+            ).order_by(Contract.created_at.desc()).first()
+        
+        if not contract:
+            return ContractToolResult(
+                success=False,
+                message=f"❌ No contracts found for client '{client.client_name}'."
+            )
+        
+        # Update contract fields
+        update_fields = []
+        if params.start_date:
+            try:
+                contract.start_date = datetime.strptime(params.start_date, "%Y-%m-%d").date()
+                update_fields.append("start_date")
+            except ValueError:
+                return ContractToolResult(
+                    success=False,
+                    message=f"❌ Invalid start date format. Please use YYYY-MM-DD format."
+                )
+        
+        if params.end_date:
+            try:
+                contract.end_date = datetime.strptime(params.end_date, "%Y-%m-%d").date()
+                update_fields.append("end_date")
+            except ValueError:
+                return ContractToolResult(
+                    success=False,
+                    message=f"❌ Invalid end date format. Please use YYYY-MM-DD format."
+                )
+        
+        if params.contract_type:
+            contract.contract_type = params.contract_type
+            update_fields.append("contract_type")
+        
+        if params.original_amount is not None:
+            contract.original_amount = params.original_amount
+            update_fields.append("original_amount")
+        
+        if params.billing_frequency:
+            print(f"🔧 update_contract_tool: Setting billing_frequency from '{contract.billing_frequency}' to '{params.billing_frequency}'")
+            contract.billing_frequency = params.billing_frequency
+            update_fields.append("billing_frequency")
+        
+        if params.status:
+            contract.status = params.status
+            update_fields.append("status")
+        
+        if params.notes:
+            contract.notes = params.notes
+            update_fields.append("notes")
+        
+        # Set audit fields
+        contract.updated_by = user_id
+        contract.updated_at = datetime.utcnow()
+        
+        print(f"🔧 update_contract_tool: About to commit changes. Update fields: {update_fields}")
+        print(f"🔧 update_contract_tool: Contract billing_frequency before commit: {contract.billing_frequency}")
+        print(f"🔧 update_contract_tool: Database session info - is_active: {db.is_active}, is_modified: {db.is_modified(contract)}")
+        
+        # Commit changes
+        try:
+            print(f"🔧 update_contract_tool: About to commit. Session info - is_active: {db.is_active}")
+            db.commit()
+            print(f"🔧 update_contract_tool: Changes committed successfully")
+        except Exception as commit_error:
+            print(f"🔧 update_contract_tool: Commit failed: {commit_error}")
+            print(f"🔧 update_contract_tool: Commit error type: {type(commit_error)}")
+            import traceback
+            traceback.print_exc()
+            try:
+                db.rollback()
+                print(f"🔧 update_contract_tool: Rollback successful")
+            except Exception as rollback_error:
+                print(f"🔧 update_contract_tool: Rollback failed: {rollback_error}")
+            raise commit_error
+        
+        db.refresh(contract)
+        print(f"🔧 update_contract_tool: Contract refreshed. billing_frequency after refresh: {contract.billing_frequency}")
+        
+        # Verify the change is visible in the current session
+        verification_contract = db.query(Contract).filter(Contract.contract_id == contract.contract_id).first()
+        print(f"🔧 update_contract_tool: Verification query - billing_frequency: {verification_contract.billing_frequency if verification_contract else 'None'}")
+        
+        return ContractToolResult(
+            success=True,
+            message=f"✅ Successfully updated contract for '{client.client_name}'. Updated fields: {', '.join(update_fields)}",
+            data={
+                "contract_id": contract.contract_id,
+                "client_name": client.client_name,
+                "updated_fields": update_fields,
+                "start_date": str(contract.start_date) if contract.start_date else None,
+                "end_date": str(contract.end_date) if contract.end_date else None,
+                "contract_type": contract.contract_type,
+                "status": contract.status
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to update contract: {str(e)}"
         )

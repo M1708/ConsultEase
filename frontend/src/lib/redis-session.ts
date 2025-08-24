@@ -8,7 +8,7 @@ interface SessionData {
 }
 
 interface ChatSessionData {
-  messages: any[];
+  messages: unknown[];
   sessionId: string;
   lastActivity: string;
 }
@@ -48,17 +48,27 @@ class RedisSessionManager {
 
   async invalidateSession(token: string): Promise<boolean> {
     try {
+      // Use AbortController for timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+      
       const response = await fetch(`${this.baseUrl}/api/auth/logout`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
       return response.ok;
     } catch (error) {
-      console.error("Failed to invalidate session:", error);
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn("Session invalidation timed out, continuing with logout");
+      } else {
+        console.error("Failed to invalidate session:", error);
+      }
       return false;
     }
   }

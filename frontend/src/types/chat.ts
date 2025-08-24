@@ -7,7 +7,7 @@ export interface ChatMessage {
   timestamp: string;
   session_id: string;
   workflow_id?: string;
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
   isUser: boolean;
 }
 
@@ -22,7 +22,17 @@ export interface SendMessageRequest {
   message: string;
   user_id?: string;
   session_id?: string;
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
+}
+
+export interface ChatResponse {
+  response: string;
+  agent: string;
+  success: boolean;
+  timestamp: string;
+  session_id: string;
+  workflow_id?: string;
+  data?: Record<string, unknown>;
 }
 
 export interface AgentCapabilities {

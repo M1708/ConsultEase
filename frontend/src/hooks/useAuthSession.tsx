@@ -2,7 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "./useAuth";
-//import { redisSessionManager, SessionData } from "@/lib/redis-session";
+
+// Simple session data interface for now
+interface SessionData {
+  sessionId: string;
+  userId: string;
+  email: string;
+  role: string;
+  createdAt: string;
+  lastAccessed: string;
+}
 
 export const useAuthSession = () => {
   const { user, isAuthenticated } = useAuth();
@@ -21,19 +30,17 @@ export const useAuthSession = () => {
         setSessionLoading(true);
         setSessionError(null);
 
-        // Get Supabase session token
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (!session?.access_token) {
-          throw new Error("No valid session token");
-        }
+        // For now, create a simple session data object
+        const mockSessionData: SessionData = {
+          sessionId: "mock-session",
+          userId: user.user_id,
+          email: user.email,
+          role: user.role,
+          createdAt: new Date().toISOString(),
+          lastAccessed: new Date().toISOString(),
+        };
 
-        // Get Redis session data
-        //const sessionData = await redisSessionManager.getSession(
-        //session.access_token
-        //);
-        setSessionData(sessionData);
+        setSessionData(mockSessionData);
       } catch (error) {
         console.error("Session load error:", error);
         setSessionError(
@@ -47,19 +54,13 @@ export const useAuthSession = () => {
     loadSession();
   }, [isAuthenticated, user]);
 
-  // const invalidateSession = async () => {
-  //   try {
-  //     const {
-  //       data: { session },
-  //     } = await supabase.auth.getSession();
-  //     if (session?.access_token) {
-  //       await redisSessionManager.invalidateSession(session.access_token);
-  //     }
-  //     setSessionData(null);
-  //   } catch (error) {
-  //     console.error("Failed to invalidate session:", error);
-  //   }
-  // };
+  const invalidateSession = async () => {
+    try {
+      setSessionData(null);
+    } catch (error) {
+      console.error("Failed to invalidate session:", error);
+    }
+  };
 
   return {
     sessionData,

@@ -37,7 +37,7 @@ def create_time_entry_tool(params: CreateTimeEntryParams, db: Session = None) ->
         if db is None:
             db = next(get_db())
         
-        time_entry_data = TimeEntryCreate(**params.dict())
+        time_entry_data = TimeEntryCreate(**params.model_dump())
         result = create_time_entry(time_entry_data, db)
         
         return ContractToolResult(
@@ -143,14 +143,13 @@ def smart_create_time_entry_tool(params: SmartTimeEntryParams, db: Session = Non
             search_words = params.project_name.lower().split()
             matching_clients = []
             
-            all_clients = db.query(Client).all()
-            for client in all_clients:
-                client_name_lower = client.client_name.lower()
-                # Check if any search word matches the client name
-                for word in search_words:
-                    if word in client_name_lower or any(word in client_word for client_word in client_name_lower.split()):
-                        matching_clients.append(client)
-                        break
+            # Optimized search - use database LIKE query instead of loading all clients
+            for word in search_words:
+                search_pattern = f"%{word}%"
+                word_clients = db.query(Client).filter(
+                    Client.client_name.ilike(search_pattern)
+                ).limit(5).all()
+                matching_clients.extend(word_clients)
             
             if len(matching_clients) == 1:
                 # Single client found - proceed with existing logic

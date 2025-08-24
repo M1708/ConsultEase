@@ -16,17 +16,22 @@ export const useAuth = () => {
     updateUser,
   } = useAuthStore();
 
-  // Add this debug logging
-  console.log("useAuth state:", {
-    isAuthenticated,
-    user: user?.email,
-    loading,
-    error,
-  });
+  // Add this debug logging (only in development)
+  if (process.env.NODE_ENV === 'development') {
+    console.log("useAuth state:", {
+      isAuthenticated,
+      user: user?.email,
+      loading,
+      error,
+    });
+  }
 
   useEffect(() => {
-    initialize();
-  }, [initialize]);
+    // Only initialize if not already authenticated to prevent redundant calls
+    if (!isAuthenticated && !loading) {
+      initialize();
+    }
+  }, [initialize, isAuthenticated, loading]);
 
   return {
     isAuthenticated,

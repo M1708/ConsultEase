@@ -46,11 +46,11 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Minimal configuration - no auth persistence for now
+// Configuration for middleware compatibility
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: false, // Disable session persistence
-    autoRefreshToken: false, // Disable auto refresh
+    persistSession: true, // Enable for middleware
+    autoRefreshToken: true, // Enable for session management
     detectSessionInUrl: false,
   },
 });

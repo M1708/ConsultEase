@@ -28,12 +28,23 @@ export const UserProfile = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
   const handleLogout = async () => {
     try {
-      await logout();
+      setIsLoggingOut(true);
+      
+      // Navigate to login immediately for instant feedback
       router.push("/login");
+      
+      // Run logout in background (non-blocking)
+      logout().catch(err => 
+        console.warn("Logout failed:", err)
+      );
+
     } catch (error) {
       console.error("Logout failed:", error);
+      setIsLoggingOut(false);
     }
   };
 
@@ -82,10 +93,10 @@ export const UserProfile = () => {
           <div className="flex items-center gap-1">
             <span
               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
-                roleColors[user.role]
+                roleColors[user.role as keyof typeof roleColors] || roleColors.viewer
               }`}
             >
-              {roleIcons[user.role]}
+              {roleIcons[user.role as keyof typeof roleIcons] || roleIcons.viewer}
               {user.role.replace("_", " ")}
             </span>
           </div>
@@ -126,10 +137,10 @@ export const UserProfile = () => {
                 <div className="flex items-center gap-2 mt-1">
                   <span
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
-                      roleColors[user.role]
+                      roleColors[user.role as keyof typeof roleColors] || roleColors.viewer
                     }`}
                   >
-                    {roleIcons[user.role]}
+                    {roleIcons[user.role as keyof typeof roleIcons] || roleIcons.viewer}
                     {user.role.replace("_", " ")}
                   </span>
                   <span className="text-xs text-gray-500">{user.status}</span>
@@ -178,10 +189,15 @@ export const UserProfile = () => {
 
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              disabled={isLoggingOut}
+              className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors ${
+                isLoggingOut
+                  ? "text-gray-400 cursor-not-allowed bg-gray-50"
+                  : "text-red-600 hover:bg-red-50"
+              }`}
             >
               <LogOut className="h-4 w-4" />
-              Sign out
+              {isLoggingOut ? "Signing out..." : "Sign out"}
             </button>
           </div>
 

@@ -48,30 +48,34 @@ class ClientOnboardingWorkflow(BaseWorkflow):
         try:
             client_info = state.data.get("client_info", {})
             
-            # Get database session from the workflow context if available
-            from backend.src.database.core.database import get_db
-            db = next(get_db())
+            # Get database session from the workflow context
+            db = state.data.get("database")
+            if not db:
+                # Fallback to creating a new session
+                from backend.src.database.core.database import get_db
+                db = next(get_db())
             
-            result = await self.contract_agent.process_message(
-                f"Create a client with name '{client_info.get('client_name')}' in the {client_info.get('industry')} industry",
-                {
-                    "user_id": state.user_id, 
-                    "session_id": state.session_id,
-                    "database": db
-                }
+            # Create client directly using the database API instead of going through the agent
+            from backend.src.database.api.clients import create_client
+            from backend.src.database.core.schemas import ClientCreate
+            
+            client_data = ClientCreate(
+                client_name=client_info.get("client_name"),
+                industry=client_info.get("industry", "General"),
+                notes=f"Created via chat interface workflow on {state.created_at}"
             )
             
-            if result["success"]:
-                state.data["client_id"] = result.get("data", {}).get("client_id")
-                state.current_step = "setup_contacts"
-                state.completed_steps.append("create_client_record")
-            else:
-                state.status = WorkflowStatus.FAILED
-                state.error_message = result["response"]
+            # Create the client directly
+            db_client = create_client(client_data, db)
+            
+            state.data["client_id"] = db_client.client_id
+            state.data["client_name"] = db_client.client_name
+            state.current_step = "setup_contacts"
+            state.completed_steps.append("create_client_record")
             
         except Exception as e:
             state.status = WorkflowStatus.FAILED
-            state.error_message = str(e)
+            state.error_message = f"Failed to create client: {str(e)}"
         
         return state
     

@@ -14,8 +14,8 @@ export interface User {
   last_login: string | null;
   password_reset_required: boolean;
   two_factor_enabled: boolean;
-  preferences: Record<string, any>;
-  permissions: Record<string, any>;
+  preferences: Record<string, unknown>;
+  permissions: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }

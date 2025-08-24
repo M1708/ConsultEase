@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -16,6 +16,12 @@ class ChatMessage(BaseModel):
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
+
+class ChatSessionStore(BaseModel): 
+    session_id: str
+    user_id: str
+    chat_data: Dict[str, Any]
+
 
 class ChatResponse(BaseModel):
     response: str
@@ -115,3 +121,55 @@ async def agent_health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent system unhealthy: {str(e)}")
+
+@router.post("/session")
+async def store_chat_session(
+    request: ChatSessionStore,
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """Store chat session data in Redis"""
+    # Verify user can only store their own session
+    if request.user_id != str(current_user.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot store session for different user"
+        )
+    
+    try:
+        await session_manager.store_chat_session(
+            request.session_id,
+            request.user_id,
+            request.chat_data
+        )
+        return {"message": "Chat session stored successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to store chat session: {str(e)}"
+        )
+
+@router.get("/session/{session_id}")
+async def get_chat_session(
+    session_id: str,
+    user_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """Get chat session data from Redis"""
+    # Verify user can only access their own session
+    if user_id != str(current_user.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot access session for different user"
+        )
+    
+    try:
+        chat_data = await session_manager.get_chat_session(session_id, user_id)
+        if not chat_data:
+            return {"messages": []}  # Return empty if no session found
+        
+        return chat_data
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve chat session: {str(e)}"
+        )
