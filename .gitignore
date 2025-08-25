@@ -26,4 +26,8 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Test directories
 test/
+backend/test/
+**/test/

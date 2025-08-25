@@ -9,7 +9,38 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { TypewriterText } from "@/components/chat/TypewriterText";
 import { useAuthStore } from "@/store/authStore";
-import { Upload, Clock, MessageSquare, FileText, X, Wifi, WifiOff } from "lucide-react";
+import { Upload, Clock, MessageSquare, FileText, X } from "lucide-react";
+
+// Custom styles for resizable panel and elegant fonts
+const customStyles = `
+  .resize-x {
+    resize: horizontal;
+    overflow: hidden;
+  }
+  .resize-x:hover {
+    cursor: ew-resize;
+  }
+  .resize-x::-webkit-resizer {
+    background-color: #3b82f6;
+    border-radius: 2px;
+    width: 8px;
+    height: 20px;
+  }
+  
+  .elegant-font {
+    font-family: 'Georgia', 'Times New Roman', serif;
+  }
+  
+  .elegant-title {
+    font-family: 'Playfair Display', 'Georgia', serif;
+    font-weight: 600;
+  }
+  
+  .elegant-body {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-weight: 400;
+  }
+`;
 
 export default function ChatPage() {
   const router = useRouter();
@@ -29,6 +60,19 @@ export default function ChatPage() {
       loadChatSession();
     }, 100); // Small delay to let UI render first
   }, [loadChatSession]);
+
+  // Inject custom styles for resizable panel and elegant fonts
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = customStyles;
+    document.head.appendChild(style);
+    
+    return () => {
+      if (document.head.contains(style)) {
+        document.head.removeChild(style);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const authState = useAuthStore.getState();
@@ -168,7 +212,7 @@ export default function ChatPage() {
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-100">
         {/* Header */}
-        <header className="bg-white shadow-sm border-b-2 border-blue-500">
+        <header className="bg-white shadow-sm border-b-2 border-blue-400" style={{ borderBottom: '2px solid #60a5fa' }}>
           {/* Session Warning Banner */}
           {sessionWarning && (
             <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
@@ -190,50 +234,21 @@ export default function ChatPage() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center">
-                <h1 className="text-xl font-semibold text-gray-900">
-                  ConsultEase AI Assistant
+                <h1 className="text-3xl font-bold text-gray-900 elegant-title">
+                  Effiscale Consulting
                 </h1>
               </div>
 
-              <div className="flex items-center space-x-4">
-                {/* Redis Status Indicator */}
-                <div className="flex items-center space-x-2">
-                  {redisStatus === 'connected' ? (
-                    <Wifi className="h-4 w-4 text-green-600" />
-                  ) : redisStatus === 'disconnected' ? (
-                    <WifiOff className="h-4 w-4 text-red-600" />
-                  ) : (
-                    <div className="h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                  )}
-                  <span className={`text-xs px-2 py-1 rounded-full ${
-                    redisStatus === 'connected' 
-                      ? 'bg-green-100 text-green-800' 
-                      : redisStatus === 'disconnected'
-                      ? 'bg-red-100 text-red-800'
-                      : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {redisStatus === 'connected' ? 'Redis Connected' : 
-                     redisStatus === 'disconnected' ? 'Redis Offline' : 'Checking...'}
-                  </span>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-600">
-                    {user?.full_name || user?.email}
-                  </span>
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                    {user?.role}
-                  </span>
-                </div>
-
+              <div className="flex items-center">
                 <button
                   onClick={handleLogout}
                   disabled={isLoggingOut}
-                  className={`text-sm transition-colors ${
+                  className={`px-4 py-2 text-sm font-medium transition-all duration-200 rounded-lg ${
                     isLoggingOut 
-                      ? "text-gray-400 cursor-not-allowed" 
-                      : "text-gray-600 hover:text-gray-900"
+                      ? "text-gray-400 cursor-not-allowed bg-gray-100" 
+                      : "text-white bg-blue-600 hover:bg-blue-700 hover:shadow-md"
                   }`}
+                  style={{ fontFamily: 'Arial, sans-serif' }}
                 >
                   {isLoggingOut ? "Logging out..." : "Logout"}
                 </button>
@@ -243,46 +258,27 @@ export default function ChatPage() {
         </header>
 
         {/* Main Content */}
-        <div className="flex h-[calc(100vh-4rem)]">
+        <div className="flex h-[calc(100vh-6rem)] bg-gray-100 overflow-hidden">
           {/* Left Panel - Reminders & Chat History */}
-          <div className="w-80 bg-white border-r-2 border-blue-500 flex flex-col">
-            {/* Session Info Section */}
-            <div className="p-4 border-b-2 border-blue-200 bg-blue-50">
-              <div className="flex items-center space-x-2 mb-3">
+          <div className="w-80 bg-white border-r-2 border-blue-400 flex flex-col" style={{ resize: 'horizontal', overflow: 'hidden', borderRight: '2px solid #60a5fa', minWidth: '256px', maxWidth: '384px', cursor: 'ew-resize' }}>
+            {/* User Name Section */}
+            <div className="p-4 bg-blue-50">
+              <div className="flex items-center space-x-2">
                 <div className="h-3 w-3 bg-green-500 rounded-full"></div>
-                <h3 className="text-sm font-semibold text-gray-900">Active Session</h3>
-              </div>
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">User:</span>
-                  <span className="text-gray-900 font-medium">{user?.email}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Role:</span>
-                  <span className="text-gray-900 font-medium">{user?.role}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Redis:</span>
-                  <span className={`font-medium ${
-                    redisStatus === 'connected' ? 'text-green-600' : 
-                    redisStatus === 'disconnected' ? 'text-red-600' : 'text-blue-600'
-                  }`}>
-                    {redisStatus === 'connected' ? 'Connected' : 
-                     redisStatus === 'disconnected' ? 'Offline' : 'Checking...'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Messages:</span>
-                  <span className="text-gray-900 font-medium">{messages.length}</span>
-                </div>
+                <h3 className="text-lg font-bold text-gray-900" style={{ fontFamily: 'Arial, sans-serif' }}>
+                  {user?.full_name || `${user?.first_name || ''} ${user?.last_name || ''}`.trim() || user?.email || 'User'}
+                </h3>
               </div>
             </div>
 
+            {/* Invisible Divider */}
+            <div className="h-8"></div>
+            
             {/* Reminders Section */}
-            <div className="flex-1 p-4 border-b-2 border-blue-200">
+            <div className="flex-1 p-4">
               <div className="flex items-center space-x-2 mb-4">
                 <Clock className="h-5 w-5 text-blue-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Reminders</h3>
+                <h3 className="text-lg font-semibold text-gray-900" style={{ fontFamily: 'Arial, sans-serif' }}>Reminders</h3>
               </div>
               <div className="space-y-3">
                 {reminders.map((reminder) => (
@@ -296,54 +292,28 @@ export default function ChatPage() {
                         : 'border-green-500 bg-green-50'
                     }`}
                   >
-                    <p className="text-sm text-gray-800">{reminder.text}</p>
-                    <p className="text-xs text-gray-500 mt-1">{reminder.time}</p>
+                    <p className="text-sm text-gray-800" style={{ fontFamily: 'Arial, sans-serif' }}>{reminder.text}</p>
+                    <p className="text-xs text-gray-500 mt-1" style={{ fontFamily: 'Arial, sans-serif' }}>{reminder.time}</p>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Chat History Section */}
-            <div className="flex-1 p-4">
-              <div className="flex items-center space-x-2 mb-4">
-                <MessageSquare className="h-5 w-5 text-blue-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Recent Messages</h3>
-              </div>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {recentMessages.length === 0 ? (
-                  <p className="text-sm text-gray-500">No recent messages</p>
-                ) : (
-                  recentMessages.map((message, index) => (
-                    <div
-                      key={index}
-                      className={`text-xs p-2 rounded ${
-                        message.isUser 
-                          ? 'bg-blue-100 text-blue-800 ml-4' 
-                          : 'bg-gray-100 text-gray-800 mr-4'
-                      }`}
-                    >
-                      <p className="truncate">
-                        {message.isUser ? 'You' : message.agent}: {message.message}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+
           </div>
 
           {/* Main Chat Area */}
-          <div className="flex-1 flex flex-col bg-gray-100">
+          <div className="flex-1 flex flex-col bg-white border-2 border-blue-400 rounded-lg m-2" style={{ border: '2px solid #60a5fa' }}>
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-3 bg-gray-50">
               {messages.length === 0 ? (
-                <div className="text-center text-gray-500 mt-8">
-                  <h3 className="text-lg font-medium mb-2">
-                    Welcome to ConsultEase AI Assistant
+                <div className="text-center text-gray-500 mt-4">
+                  <h3 className="text-lg font-semibold mb-2 elegant-title text-gray-700">
+                    Welcome to Effiscale Consulting
                   </h3>
-                  <p>
+                  <p className="text-gray-600" style={{ fontFamily: 'Arial, sans-serif' }}>
                     Ask me anything about your clients, contracts, time
-                    tracking, or deliverables.
+                    tracking, deliverables, or employees.
                   </p>
                 </div>
               ) : (
@@ -354,8 +324,8 @@ export default function ChatPage() {
                         // User message - Right side
                         <div className="flex-1 flex justify-end">
                           <div className="max-w-md bg-blue-600 text-white px-4 py-3 rounded-lg shadow-md">
-                            <div className="whitespace-pre-wrap">{message.message}</div>
-                            <div className="text-xs opacity-70 mt-1">
+                            <div className="whitespace-pre-wrap" style={{ fontFamily: 'Arial, sans-serif' }}>{message.message}</div>
+                            <div className="text-xs opacity-70 mt-1" style={{ fontFamily: 'Arial, sans-serif' }}>
                               {new Date(message.timestamp).toLocaleTimeString()}
                             </div>
                           </div>
@@ -363,23 +333,21 @@ export default function ChatPage() {
                       ) : (
                         // Agent message - Left side
                         <div className="flex-1 flex justify-start">
-                          <div className="max-w-md bg-white border-2 border-blue-200 px-4 py-3 rounded-lg shadow-md">
-                            <div className="flex items-center space-x-2 mb-2">
-                              <div className="text-xs text-gray-600">{message.agent}</div>
-                              {message.success && (
-                                <span className="text-green-600 text-xs">✔ success</span>
-                              )}
+                          <div className="max-w-md bg-white px-4 py-3 rounded-lg shadow-md">
+                            <div className="mb-2">
+                              <div className="text-xs text-gray-600 font-bold" style={{ fontFamily: 'Arial, sans-serif' }}>{message.agent}</div>
                             </div>
                             {message.isUser ? (
-                              <div className="whitespace-pre-wrap">{message.message}</div>
+                              <div className="whitespace-pre-wrap" style={{ fontFamily: 'Arial, sans-serif' }}>{message.message}</div>
                             ) : (
                               <TypewriterText
                                 text={message.response}
                                 speed={20}
                                 className="text-gray-900"
+                                style={{ fontFamily: 'Arial, sans-serif' }}
                               />
                             )}
-                            <div className="text-xs text-gray-500 mt-1">
+                            <div className="text-xs text-gray-500 mt-1" style={{ fontFamily: 'Arial, sans-serif' }}>
                               {new Date(message.timestamp).toLocaleTimeString()}
                             </div>
                           </div>
@@ -391,9 +359,9 @@ export default function ChatPage() {
                   {/* Typing indicator after user messages */}
                   {messages.length > 0 && messages[messages.length - 1].isUser && isTyping && (
                     <div className="flex justify-start">
-                      <div className="max-w-md bg-white border-2 border-blue-200 px-4 py-3 rounded-lg shadow-md">
+                      <div className="max-w-md bg-white px-4 py-3 rounded-lg shadow-md">
                         <div className="flex items-center space-x-2">
-                          <span className="text-sm text-gray-600">AI is thinking</span>
+                          <span className="text-base text-gray-600">Milo is thinking</span>
                           <div className="flex space-x-1">
                             <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"></div>
                             <div
@@ -416,7 +384,7 @@ export default function ChatPage() {
             </div>
 
             {/* Chat Input Area */}
-            <div className="bg-white border-t-2 border-blue-500 p-4">
+            <div className="bg-white border-t-2 border-blue-400 p-4" style={{ borderTop: '2px solid #60a5fa' }}>
               {/* File Upload Area */}
               {selectedFile && (
                 <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
@@ -436,44 +404,43 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {/* File Upload Button */}
-              <div className="mb-3">
-                <label className="inline-flex items-center px-3 py-2 border border-blue-300 rounded-md shadow-sm text-sm font-medium text-blue-700 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Document
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileUpload(file);
-                    }}
+              {/* Chat Input with File Upload */}
+              <div className="flex items-end space-x-3">
+                {/* File Upload Button - Plus Icon */}
+                <div className="flex-shrink-0">
+                  <label className="inline-flex items-center justify-center w-12 h-12 border-2 border-blue-600 rounded-full shadow-lg text-blue-600 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 cursor-pointer transition-all duration-200 transform hover:scale-110">
+                    <Upload className="h-6 w-6" />
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileUpload(file);
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {/* Chat Input */}
+                <div className="flex-1">
+                  <ChatInput
+                    onSendMessage={handleSendMessage}
+                    isTyping={isTyping}
+                    placeholder="Ask about clients, contracts, time tracking, deliverables, or employees..."
                   />
-                </label>
-                <span className="ml-2 text-xs text-gray-500">
-                  PDF, DOC, DOCX, JPG, PNG
-                </span>
+                </div>
               </div>
 
-              {/* Chat Input */}
-              <ChatInput
-                onSendMessage={handleSendMessage}
-                isTyping={isTyping}
-                placeholder="Ask about clients, contracts, time tracking, or deliverables..."
-              />
-
               {/* Bottom Controls */}
-              <div className="flex justify-between items-center mt-3">
+              <div className="flex justify-end items-center mt-3">
                 <button
                   onClick={clearChat}
-                  className="text-sm text-gray-600 hover:text-gray-800"
+                  className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 rounded-md hover:bg-gray-100 transition-colors"
+                  style={{ fontFamily: 'Arial, sans-serif' }}
                 >
                   Clear conversation
                 </button>
-                <span className="text-sm text-gray-500">
-                  {messages.filter(m => !m.isUser).length} AI responses
-                </span>
               </div>
             </div>
           </div>

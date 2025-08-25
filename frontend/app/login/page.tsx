@@ -69,7 +69,7 @@ export default function LoginPage() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: "#f9fafb",
+          backgroundColor: "#f3f4f6",
           padding: "1rem",
         }}
       >
@@ -181,7 +181,7 @@ export default function LoginPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "#f9fafb",
+        backgroundColor: "#f3f4f6",
         padding: "1rem",
       }}
     >
@@ -204,7 +204,7 @@ export default function LoginPage() {
             color: "#1f2937",
           }}
         >
-          Login to ConsultEase
+          Login to Effiscale Consulting
         </h2>
 
         {(message || authError) && (

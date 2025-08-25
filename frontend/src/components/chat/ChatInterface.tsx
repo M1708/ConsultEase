@@ -206,7 +206,7 @@ export const ChatInterface = () => {
             placeholder={
               user.role === "client"
                 ? "Ask about your projects, contracts, or billing..."
-                : "Ask me about clients, contracts, deliverables, time tracking..."
+                : "Ask me about clients, contracts, deliverables, time tracking, or employees..."
             }
           />
 

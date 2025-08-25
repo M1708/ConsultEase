@@ -2,10 +2,13 @@ from openai import OpenAI
 from typing import Dict, Any, List, Callable
 from backend.src.aiagents.prompts import ContractAgentPrompts
 from backend.src.aiagents.tools.contract_tools import (
-    create_client_tool, search_clients_tool, analyze_contract_tool, 
+    create_client_tool, search_clients_tool, get_all_clients_tool, get_client_details_tool, get_contract_details_tool, analyze_contract_tool, 
     smart_create_contract_tool, smart_contract_document_tool, get_contracts_by_client_tool,
-    get_all_contracts_tool, update_contract_tool, CreateClientParams, SmartContractParams, 
+    get_all_contracts_tool, get_contracts_by_billing_date_tool, update_contract_tool, CreateClientParams, SmartContractParams, 
     ContractDocumentParams, UpdateContractParams, ContractToolResult
+)
+from backend.src.aiagents.tools.client_tools import (
+    update_client_tool as update_client_tool_client, UpdateClientParams as UpdateClientParamsClient, ClientToolResult
 )
 from backend.src.aiagents.guardrails.input_guardrails import input_sanitization_guardrail
 from backend.src.aiagents.guardrails.output_guardrails import output_validation_guardrail
@@ -15,7 +18,7 @@ import os
 class ContractAgent:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.name = "ContractBot"
+        self.name = "Milo"
         self.instructions = ContractAgentPrompts.SYSTEM_INSTRUCTIONS
         self.model = "gpt-4o-mini"
         
@@ -23,11 +26,16 @@ class ContractAgent:
         self.tool_functions = {
             "create_client": self._create_client_wrapper,
             "search_clients": self._search_clients_wrapper,
+            "get_all_clients": self._get_all_clients_wrapper,
+            "get_client_details": self._get_client_details_wrapper,
             "analyze_contract": self._analyze_contract_wrapper,
             "create_contract": self._smart_create_contract_wrapper,
             "get_client_contracts": self._get_contracts_by_client_wrapper,
             "get_all_contracts": self._get_all_contracts_wrapper,
+            "get_contract_details": self._get_contract_details_wrapper,
+            "get_contracts_by_billing_date": self._get_contracts_by_billing_date_wrapper,
             "update_contract": self._update_contract_wrapper,
+            "update_client": self._update_client_wrapper,
             "manage_contract_document": self._smart_contract_document_wrapper
         }
         
@@ -39,6 +47,39 @@ class ContractAgent:
         context = kwargs.pop('context', None)
         params = CreateClientParams(**kwargs)
         result = create_client_tool(params, context, db)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "data": result.data
+        }
+    
+    def _get_all_clients_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for get_all_clients_tool"""
+        db = kwargs.pop('db', None)
+        result = get_all_clients_tool(db)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "data": result.data
+        }
+    
+    def _get_contract_details_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for get_contract_details_tool"""
+        db = kwargs.pop('db', None)
+        contract_id = kwargs.get("contract_id")
+        client_name = kwargs.get("client_name")
+        result = get_contract_details_tool(contract_id, client_name, db)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "data": result.data
+        }
+    
+    def _get_client_details_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for get_client_details_tool"""
+        db = kwargs.pop('db', None)
+        client_name = kwargs.get("client_name")
+        result = get_client_details_tool(client_name, db)
         return {
             "success": result.success,
             "message": result.message,
@@ -100,12 +141,36 @@ class ContractAgent:
             "data": result.data
         }
     
+    def _get_contracts_by_billing_date_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for get_contracts_by_billing_date_tool"""
+        db = kwargs.pop('db', None)
+        start_date = kwargs.get("start_date")
+        end_date = kwargs.get("end_date")
+        result = get_contracts_by_billing_date_tool(start_date, end_date, db)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "data": result.data
+        }
+    
     def _update_contract_wrapper(self, **kwargs) -> Dict[str, Any]:
         """Wrapper for update_contract_tool"""
         db = kwargs.pop('db', None)
         context = kwargs.pop('context', None)
         params = UpdateContractParams(**kwargs)
         result = update_contract_tool(params, context, db)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "data": result.data
+        }
+    
+    def _update_client_wrapper(self, **kwargs) -> Dict[str, Any]:
+        """Wrapper for update_client_tool"""
+        db = kwargs.pop('db', None)
+        context = kwargs.pop('context', None)
+        params = UpdateClientParamsClient(**kwargs)
+        result = update_client_tool_client(params, context, db)
         return {
             "success": result.success,
             "message": result.message,
@@ -179,6 +244,56 @@ class ContractAgent:
                                 "type": "integer",
                                 "description": "Maximum number of results to return",
                                 "default": 10
+                            }
+                        },
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_all_clients",
+                    "description": "Get a list of all clients in the system with basic information (name, industry, contact details)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_client_details",
+                    "description": "Get detailed information about a specific client including contact details, email addresses, and company information",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {
+                                "type": "string",
+                                "description": "The name of the client to get detailed information for"
+                            }
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_contract_details",
+                    "description": "Get comprehensive contract details including financial information, billing details, and metadata. Can search by contract ID or client name.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "contract_id": {
+                                "type": "integer",
+                                "description": "The ID of the specific contract to get details for"
+                            },
+                            "client_name": {
+                                "type": "string",
+                                "description": "The name of the client to get contract details for (will return most recent contract)"
                             }
                         },
                         "required": []
@@ -275,6 +390,27 @@ class ContractAgent:
             {
                 "type": "function",
                 "function": {
+                    "name": "get_contracts_by_billing_date",
+                    "description": "Get contracts with billing prompt dates within a specific date range",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "start_date": {
+                                "type": "string",
+                                "description": "Start date for the billing prompt date range (YYYY-MM-DD format)"
+                            },
+                            "end_date": {
+                                "type": "string",
+                                "description": "End date for the billing prompt date range (YYYY-MM-DD format)"
+                            }
+                        },
+                        "required": ["start_date", "end_date"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "update_contract",
                     "description": "Update an existing contract's details like dates, amount, status, etc.",
                     "parameters": {
@@ -308,6 +444,10 @@ class ContractAgent:
                                 "type": "string",
                                 "description": "New billing frequency: Monthly, Weekly, or One-time (optional)"
                             },
+                            "billing_prompt_next_date": {
+                                "type": "string",
+                                "description": "New billing prompt next date in YYYY-MM-DD format (optional)"
+                            },
                             "status": {
                                 "type": "string",
                                 "description": "New contract status: draft, active, completed, or terminated (optional)"
@@ -315,6 +455,55 @@ class ContractAgent:
                             "notes": {
                                 "type": "string",
                                 "description": "Additional notes about the contract update (optional)"
+                            }
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "update_client",
+                    "description": "Update an existing client's information like contact details, industry, notes, etc.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {
+                                "type": "string",
+                                "description": "Name of the client to update"
+                            },
+                            "industry": {
+                                "type": "string",
+                                "description": "New industry or business sector (optional)"
+                            },
+                            "primary_contact_name": {
+                                "type": "string",
+                                "description": "New primary contact person name (optional)"
+                            },
+                            "primary_contact_email": {
+                                "type": "string",
+                                "description": "New primary contact email address (optional)"
+                            },
+                            "company_size": {
+                                "type": "string",
+                                "description": "New company size: Small, Medium, Large, Enterprise (optional)"
+                            },
+                            "notes": {
+                                "type": "string",
+                                "description": "New notes or comments about the client (optional)"
+                            },
+                            "address": {
+                                "type": "string",
+                                "description": "New company address (optional)"
+                            },
+                            "phone": {
+                                "type": "string",
+                                "description": "New company phone number (optional)"
+                            },
+                            "website": {
+                                "type": "string",
+                                "description": "New company website URL (optional)"
                             }
                         },
                         "required": ["client_name"]
@@ -350,7 +539,7 @@ class ContractAgent:
         ]
     
     async def process_message(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Process user message through ContractBot using OpenAI function calling"""
+        """Process user message through Milo using OpenAI function calling"""
         try:
             # Add context to message processing
             enhanced_context = {
@@ -368,8 +557,20 @@ class ContractAgent:
             # Prepare messages for OpenAI with function calling
             messages = [
                 {"role": "system", "content": self.instructions},
-                {"role": "user", "content": f"Context: {json.dumps(json_safe_context)}\n\nMessage: {sanitized_message}"}
             ]
+            
+            # Add conversation history if available for context
+            if "conversation_history" in enhanced_context and enhanced_context["conversation_history"]:
+                # Add recent conversation history (last 3-4 messages for context)
+                recent_history = enhanced_context["conversation_history"][-4:]
+                for msg in recent_history:
+                    if msg.get("role") == "user" and msg.get("content"):
+                        messages.append({"role": "user", "content": msg["content"]})
+                    elif msg.get("role") == "assistant" and msg.get("content"):
+                        messages.append({"role": "assistant", "content": msg["content"]})
+            
+            # Add current message
+            messages.append({"role": "user", "content": f"Context: {json.dumps(json_safe_context)}\n\nMessage: {sanitized_message}"})
             
             # Process through OpenAI with function calling
             response = self.client.chat.completions.create(
@@ -517,7 +718,7 @@ class ContractAgent:
                         result_data = tool_results[0].get("data")
                 
                 return {
-                    "agent": "ContractBot",
+                    "agent": "Milo",
                     "response": validated_response if isinstance(validated_response, str) else str(validated_response),
                     "success": True,
                     "data": result_data
@@ -534,7 +735,7 @@ class ContractAgent:
                 validated_response = output_validation_guardrail(response_content)
                 
                 return {
-                    "agent": "ContractBot",
+                    "agent": "Milo",
                     "response": validated_response if isinstance(validated_response, str) else str(validated_response),
                     "success": True,
                     "data": None
@@ -545,7 +746,7 @@ class ContractAgent:
             import traceback
             traceback.print_exc()
             return {
-                "agent": "ContractBot",
+                "agent": "Milo",
                 "response": f"❌ Error processing request: {str(e)}",
                 "success": False
             }
@@ -806,7 +1007,7 @@ class ContractAgent:
     def get_capabilities(self) -> Dict[str, Any]:
         """Return agent capabilities"""
         return {
-            "name": "ContractBot",
+            "name": "Milo",
             "description": "Client and contract management specialist",
             "capabilities": [
                 "Create and manage client records",

@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 from backend.src.aiagents.contract_agent import ContractAgent
 from backend.src.aiagents.time_agent import TimeTrackerAgent
 from backend.src.aiagents.deliverable_agent import DeliverableAgent
+from backend.src.aiagents.employee_agent import EmployeeAgent
 from backend.src.aiagents.workflows.client_onboarding_workflow import ClientOnboardingWorkflow
 from backend.src.aiagents.workflows.base_workflow import WorkflowState, WorkflowStatus
 import uuid
@@ -13,7 +14,8 @@ class MultiAgentOrchestrator:
         self.agents = {
             "contract": ContractAgent(),
             "time": TimeTrackerAgent(),
-            "deliverable": DeliverableAgent()
+            "deliverable": DeliverableAgent(),
+            "employee": EmployeeAgent()
         }
         
         # Initialize workflows
@@ -28,6 +30,12 @@ class MultiAgentOrchestrator:
         """Main entry point for processing user messages"""
         print(f"🎯 AgentOrchestrator: Processing message: {message}")
         
+        # Check if message is a greeting
+        greeting_result = self._handle_greeting(message, context)
+        if greeting_result:
+            print(f"🎯 AgentOrchestrator: Greeting detected, returning personalized response")
+            return greeting_result
+        
         # Check if message is workflow-related
         workflow_result = await self._check_workflow_intent(message, context)
         if workflow_result:
@@ -40,30 +48,108 @@ class MultiAgentOrchestrator:
         
         if selected_agent:
             print(f"🎯 AgentOrchestrator: Calling agent.process_message")
-            result = await selected_agent.process_message(message, context)
+            # Enhance context with conversation history for better persistence
+            enhanced_context = self._enhance_context_with_history(context, message)
+            result = await selected_agent.process_message(message, enhanced_context)
             print(f"🎯 AgentOrchestrator: Agent result: {result}")
             return result
         
         # Fallback response
         fallback_result = {
-            "agent": "System",
+            "agent": "Milo",
             "response": "I can help you with client management, time tracking, and project coordination. How can I assist you today?",
             "success": True
         }
         print(f"🎯 AgentOrchestrator: Returning fallback result: {fallback_result}")
         return fallback_result
     
+    def _handle_greeting(self, message: str, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Handle greeting messages with personalized responses"""
+        message_lower = message.lower().strip()
+        
+        # Define greeting patterns - only exact matches or standalone greetings
+        greeting_patterns = [
+            "hello", "hi", "hey", "sup", "yo", "greetings"
+        ]
+        
+        # Time-based greetings that should be more specific
+        time_greetings = [
+            "good morning", "good afternoon", "good evening", "morning", "afternoon", "evening"
+        ]
+        
+        # Check if message is a standalone greeting (not part of a longer message)
+        is_greeting = False
+        
+        # For time-based greetings, check if they're at the start of the message
+        for time_greeting in time_greetings:
+            if message_lower.startswith(time_greeting) and len(message_lower.strip()) <= len(time_greeting) + 5:
+                is_greeting = True
+                break
+        
+        # For simple greetings, check if they're the only content or very short
+        if not is_greeting:
+            for greeting in greeting_patterns:
+                if message_lower == greeting or message_lower == f"{greeting}!" or message_lower == f"{greeting}.":
+                    is_greeting = True
+                    break
+        
+        # IMPORTANT: If the message contains business-related keywords, it's NOT a greeting
+        business_keywords = [
+            "create", "add", "new", "employee", "client", "contract", "deliverable", "time", "track", "update", "search", "find", "show", "list", "get", "manage"
+        ]
+        
+        # If message contains business keywords, it's not a greeting
+        if any(keyword in message_lower for keyword in business_keywords):
+            is_greeting = False
+        
+        if not is_greeting:
+            return None
+        
+        # Extract user's first name from context
+        user_first_name = "User"  # Default fallback
+        
+        if context and "user_first_name" in context:
+            user_first_name = context["user_first_name"]
+        elif context and "user_name" in context:
+            # Try to extract first name from full name
+            full_name = context["user_name"]
+            if full_name and " " in full_name:
+                user_first_name = full_name.split(" ")[0]
+            elif full_name:
+                user_first_name = full_name
+        
+        # Create personalized greeting response
+        greeting_response = f"Hello {user_first_name}! How can I help you today?"
+        
+        return {
+            "agent": "Milo",
+            "response": greeting_response,
+            "success": True,
+            "timestamp": context.get("timestamp", ""),
+            "session_id": context.get("session_id", ""),
+            "data": {
+                "greeting_type": "personalized",
+                "user_first_name": user_first_name,
+                "detected_greeting": message_lower
+            }
+        }
+    
     def _select_agent(self, message: str, context: Dict[str, Any]) -> Optional[Any]:
         """Select the most appropriate agent for the message"""
         message_lower = message.lower()
         print(f"🎯 AgentOrchestrator._select_agent: Message: {message_lower}")
         
-        # Agent selection logic
+        # Agent selection logic - ORDER MATTERS! Check more specific agents first
+        employee_keywords = ["employee", "hr", "human resources", "staff", "personnel", "hire", "onboard employee", "employee record", "create employee", "add employee", "new employee", "software engineer", "department", "permanent", "full-time", "part-time", "employment type", "job title"]
         deliverable_keywords = ["deliverable", "project", "milestone", "task", "add deliverable", "create deliverable"]
         contract_keywords = ["client", "contract", "company", "agreement", "onboard"]
-        time_keywords = ["time", "hours", "log", "timesheet", "productivity"]
+        time_keywords = ["timesheet", "log hours", "time entry", "productivity tracking", "work hours", "billable hours"]
         
-        if any(keyword in message_lower for keyword in deliverable_keywords):
+        # Check employee agent FIRST (most specific)
+        if any(keyword in message_lower for keyword in employee_keywords):
+            print(f"🎯 AgentOrchestrator._select_agent: Selected employee agent")
+            return self.agents["employee"]
+        elif any(keyword in message_lower for keyword in deliverable_keywords):
             print(f"🎯 AgentOrchestrator._select_agent: Selected deliverable agent")
             return self.agents["deliverable"]
         elif any(keyword in message_lower for keyword in contract_keywords):
@@ -82,6 +168,40 @@ class MultiAgentOrchestrator:
         # For now, let individual agents handle client creation directly
         # Workflows can be added later for complex multi-step processes
         return None
+    
+    def _enhance_context_with_history(self, context: Dict[str, Any], current_message: str) -> Dict[str, Any]:
+        """Enhance context with conversation history for better agent memory"""
+        enhanced_context = context.copy()
+        
+        # Add conversation context markers
+        enhanced_context["conversation_context"] = {
+            "current_message": current_message,
+            "message_type": "user_query",
+            "requires_context": True,
+            "timestamp": context.get("timestamp", ""),
+            "session_id": context.get("session_id", "")
+        }
+        
+        # Ensure conversation history is available
+        if "conversation_history" in context:
+            enhanced_context["recent_messages"] = context["conversation_history"][-5:]  # Last 5 messages
+            enhanced_context["conversation_summary"] = {
+                "total_messages": len(context["conversation_history"]),
+                "user_messages": len([m for m in context["conversation_history"] if m.get("role") == "user"]),
+                "agent_messages": len([m for m in context["conversation_history"] if m.get("role") == "assistant"])
+            }
+        
+        # Add user context for personalization
+        if "user_first_name" in context:
+            enhanced_context["user_context"] = {
+                "first_name": context["user_first_name"],
+                "last_name": context.get("user_last_name", ""),
+                "full_name": context.get("user_name", ""),
+                "role": context.get("user_role", ""),
+                "personalized": True
+            }
+        
+        return enhanced_context
     
     def get_agent_capabilities(self) -> Dict[str, Any]:
         """Get capabilities of all agents"""

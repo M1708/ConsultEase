@@ -7,13 +7,15 @@ interface TypewriterTextProps {
   speed?: number; // milliseconds per character
   onComplete?: () => void;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 export const TypewriterText: React.FC<TypewriterTextProps> = ({
   text,
   speed = 30,
   onComplete,
-  className = ""
+  className = "",
+  style
 }) => {
   const [displayedText, setDisplayedText] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -38,7 +40,7 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
   }, [text]);
 
   return (
-    <div className={`whitespace-pre-wrap ${className}`}>
+    <div className={`whitespace-pre-wrap ${className}`} style={style}>
       {displayedText}
       {currentIndex < text.length && (
         <span className="animate-pulse">|</span>

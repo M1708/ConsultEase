@@ -1,5 +1,6 @@
 // frontend/app/layout.tsx
 import "./globals.css";
+import BodyWrapper from "@/components/layout/BodyWrapper";
 
 export default function RootLayout({
   children,
@@ -8,7 +9,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="antialiased">
+        <BodyWrapper>
+          {children}
+        </BodyWrapper>
+      </body>
     </html>
   );
 }

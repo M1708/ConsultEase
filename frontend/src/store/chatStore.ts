@@ -92,6 +92,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         context: {
           user_role: user.role,
           user_name: user.full_name,
+          user_first_name: user.first_name || user.full_name?.split(' ')[0] || 'User',
+          user_last_name: user.last_name || user.full_name?.split(' ')[1] || '',
+          conversation_history: state.messages.map(msg => ({
+            role: msg.isUser ? 'user' : 'assistant',
+            content: msg.isUser ? msg.message : msg.response,
+            timestamp: msg.timestamp
+          })),
+          current_session: state.sessionId,
+          previous_context: state.messages.length > 0 ? {
+            last_user_message: state.messages[state.messages.length - 1]?.message || '',
+            last_agent_response: state.messages[state.messages.length - 1]?.response || '',
+            conversation_length: state.messages.length
+          } : null
         },
       };
 
@@ -132,6 +145,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({
       messages: [],
       sessionId: `session_${Date.now()}`,
+      error: null,
     }),
 
   setTyping: (typing: boolean) => set({ isTyping: typing }),
@@ -169,7 +183,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const data = await response.json();
         if (data.messages && data.messages.length > 0) {
           console.log("Restored", data.messages.length, "previous messages");
-          set({ messages: data.messages });
+          set({ 
+            messages: data.messages,
+            sessionId: data.session_id || sessionId // Ensure we keep the same session ID
+          });
         }
       }
     } catch (error) {

@@ -86,7 +86,10 @@ def search_clients_tool(search_term: Optional[str] = None, limit: int = 10, db: 
                 "client_id": client.client_id,
                 "client_name": client.client_name,
                 "industry": client.industry,
-                "primary_contact_name": client.primary_contact_name
+                "primary_contact_name": client.primary_contact_name,
+                "primary_contact_email": client.primary_contact_email,
+                "company_size": client.company_size,
+                "notes": client.notes
             })
         
         return ContractToolResult(
@@ -135,6 +138,166 @@ def analyze_contract_tool(contract_text: str) -> ContractToolResult:
         return ContractToolResult(
             success=False,
             message=f"❌ Failed to analyze contract: {str(e)}"
+        )
+
+def get_client_details_tool(client_name: str, db: Session = None) -> ContractToolResult:
+    """Tool for getting detailed client information including contact details"""
+    try:
+        if db is None:
+            db = next(get_db())
+        
+        # Find client by name
+        client = get_client_by_name(client_name, db)
+        if not client:
+            return ContractToolResult(
+                success=False,
+                message=f"❌ Client '{client_name}' not found."
+            )
+        
+        # Return detailed client information
+        client_details = {
+            "client_id": client.client_id,
+            "client_name": client.client_name,
+            "industry": client.industry,
+            "primary_contact_name": client.primary_contact_name,
+            "primary_contact_email": client.primary_contact_email,
+            "company_size": client.company_size,
+            "notes": client.notes,
+            "created_at": str(client.created_at) if client.created_at else None,
+            "updated_at": str(client.updated_at) if client.updated_at else None
+        }
+        
+        return ContractToolResult(
+            success=True,
+            message=f"✅ Found client '{client.client_name}' with complete details",
+            data={
+                "client": client_details,
+                "has_contact_info": bool(client.primary_contact_name or client.primary_contact_email),
+                "has_email": bool(client.primary_contact_email)
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to get client details: {str(e)}"
+        )
+
+def get_contract_details_tool(contract_id: Optional[int] = None, client_name: Optional[str] = None, db: Session = None) -> ContractToolResult:
+    """Tool for getting detailed contract information including financial details, billing info, and metadata"""
+    try:
+        if db is None:
+            db = next(get_db())
+        
+        contract = None
+        
+        if contract_id:
+            # Get contract by ID
+            contract = db.query(Contract).filter(Contract.contract_id == contract_id).first()
+        elif client_name:
+            # Get the most recent contract for a client
+            client = get_client_by_name(client_name, db)
+            if not client:
+                return ContractToolResult(
+                    success=False,
+                    message=f"❌ Client '{client_name}' not found."
+                )
+            contract = db.query(Contract).filter(
+                Contract.client_id == client.client_id
+            ).order_by(Contract.created_at.desc()).first()
+        else:
+            return ContractToolResult(
+                success=False,
+                message="❌ Please provide either contract_id or client_name."
+            )
+        
+        if not contract:
+            return ContractToolResult(
+                success=False,
+                message=f"❌ Contract not found for the specified criteria."
+            )
+        
+        # Get client information
+        client = db.query(Client).filter(Client.client_id == contract.client_id).first()
+        
+        # Return comprehensive contract details
+        contract_details = {
+            "contract_id": contract.contract_id,
+            "client_name": client.client_name if client else "Unknown",
+            "client_id": contract.client_id,
+            "contract_type": contract.contract_type,
+            "status": contract.status,
+            "original_amount": float(contract.original_amount) if contract.original_amount else None,
+            "current_amount": float(contract.current_amount) if contract.current_amount else None,
+            "billing_frequency": contract.billing_frequency,
+            "billing_prompt_next_date": str(contract.billing_prompt_next_date) if contract.billing_prompt_next_date else None,
+            "termination_date": str(contract.termination_date) if contract.termination_date else None,
+            "amendments": contract.amendments,
+            "notes": contract.notes,
+            "start_date": str(contract.start_date) if contract.start_date else None,
+            "end_date": str(contract.end_date) if contract.end_date else None,
+            "has_document": bool(contract.document_filename),
+            "document_filename": contract.document_filename,
+            "created_at": str(contract.created_at) if contract.created_at else None,
+            "updated_at": str(contract.updated_at) if contract.updated_at else None
+        }
+        
+        return ContractToolResult(
+            success=True,
+            message=f"✅ Found contract details for '{contract_details['client_name']}'",
+            data={
+                "contract": contract_details,
+                "has_financial_info": bool(contract.original_amount or contract.current_amount),
+                "has_billing_info": bool(contract.billing_frequency or contract.billing_prompt_next_date),
+                "has_metadata": bool(contract.amendments or contract.notes)
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to get contract details: {str(e)}"
+        )
+
+def get_all_clients_tool(db: Session = None) -> ContractToolResult:
+    """Tool for getting all clients in the system with basic information"""
+    try:
+        if db is None:
+            db = next(get_db())
+        
+        # Get all clients
+        clients = db.query(Client).order_by(Client.client_name).all()
+        
+        client_list = []
+        for client in clients:
+            client_list.append({
+                "client_id": client.client_id,
+                "client_name": client.client_name,
+                "industry": client.industry,
+                "primary_contact_name": client.primary_contact_name,
+                "primary_contact_email": client.primary_contact_email,
+                "company_size": client.company_size,
+                "created_at": str(client.created_at) if client.created_at else None
+            })
+        
+        return ContractToolResult(
+            success=True,
+            message=f"📋 Found {len(client_list)} clients in the system",
+            data={
+                "clients": client_list,
+                "count": len(client_list),
+                "summary": {
+                    "total_clients": len(client_list),
+                    "industries": list(set(c["industry"] for c in client_list if c["industry"])),
+                    "has_contacts": len([c for c in client_list if c["primary_contact_name"] or c["primary_contact_email"]])
+                }
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to get all clients: {str(e)}"
         )
 
 class SmartContractParams(BaseModel):
@@ -362,6 +525,12 @@ def get_contracts_by_client_tool(client_name: str, db: Session = None) -> Contra
                 "contract_type": contract.contract_type,
                 "status": contract.status,
                 "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                "current_amount": float(contract.current_amount) if contract.current_amount else None,
+                "billing_frequency": contract.billing_frequency,
+                "billing_prompt_next_date": str(contract.billing_prompt_next_date) if contract.billing_prompt_next_date else None,
+                "termination_date": str(contract.termination_date) if contract.termination_date else None,
+                "amendments": contract.amendments,
+                "notes": contract.notes,
                 "start_date": str(contract.start_date) if contract.start_date else None,
                 "end_date": str(contract.end_date) if contract.end_date else None,
                 "has_document": bool(contract.document_filename),
@@ -373,6 +542,13 @@ def get_contracts_by_client_tool(client_name: str, db: Session = None) -> Contra
             message=f"📋 Found {len(contract_list)} contracts for client '{client.client_name}'",
             data={
                 "client_name": client.client_name,
+                "client_info": {
+                    "client_id": client.client_id,
+                    "industry": client.industry,
+                    "primary_contact_name": client.primary_contact_name,
+                    "primary_contact_email": client.primary_contact_email,
+                    "company_size": client.company_size
+                },
                 "contracts": contract_list,
                 "count": len(contract_list)
             }
@@ -401,6 +577,12 @@ def get_all_contracts_tool(db: Session = None) -> ContractToolResult:
                 "contract_type": contract.contract_type,
                 "status": contract.status,
                 "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                "current_amount": float(contract.current_amount) if contract.current_amount else None,
+                "billing_frequency": contract.billing_frequency,
+                "billing_prompt_next_date": str(contract.billing_prompt_next_date) if contract.billing_prompt_next_date else None,
+                "termination_date": str(contract.termination_date) if contract.termination_date else None,
+                "amendments": contract.amendments,
+                "notes": contract.notes,
                 "start_date": str(contract.start_date) if contract.start_date else None,
                 "end_date": str(contract.end_date) if contract.end_date else None,
                 "has_document": bool(contract.document_filename),
@@ -423,6 +605,73 @@ def get_all_contracts_tool(db: Session = None) -> ContractToolResult:
             message=f"❌ Failed to get all contracts: {str(e)}"
         )
 
+def get_contracts_by_billing_date_tool(start_date: str, end_date: str, db: Session = None) -> ContractToolResult:
+    """Tool for getting contracts with billing prompt dates within a specific range"""
+    try:
+        if db is None:
+            db = next(get_db())
+        
+        from datetime import datetime
+        
+        # Parse the date range
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            return ContractToolResult(
+                success=False,
+                message="❌ Invalid date format. Please use YYYY-MM-DD format."
+            )
+        
+        # Get contracts with billing prompt dates in the specified range
+        contracts = db.query(Contract).join(Client).filter(
+            Contract.billing_prompt_next_date.isnot(None),
+            Contract.billing_prompt_next_date >= start_dt,
+            Contract.billing_prompt_next_date <= end_dt
+        ).order_by(Contract.billing_prompt_next_date.asc()).all()
+        
+        print(f"🔧 get_contracts_by_billing_date_tool: Found {len(contracts)} contracts with billing dates in range")
+        
+        contract_list = []
+        for contract in contracts:
+            print(f"🔧 get_contracts_by_billing_date_tool: Contract {contract.contract_id} - billing_prompt_next_date: {contract.billing_prompt_next_date}")
+            contract_list.append({
+                "contract_id": contract.contract_id,
+                "client_name": contract.client.client_name,
+                "contract_type": contract.contract_type,
+                "status": contract.status,
+                "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                "current_amount": float(contract.current_amount) if contract.current_amount else None,
+                "billing_frequency": contract.billing_frequency,
+                "billing_prompt_next_date": str(contract.billing_prompt_next_date) if contract.billing_prompt_next_date else None,
+                "termination_date": str(contract.termination_date) if contract.termination_date else None,
+                "amendments": contract.amendments,
+                "notes": contract.notes,
+                "start_date": str(contract.start_date) if contract.start_date else None,
+                "end_date": str(contract.end_date) if contract.end_date else None,
+                "has_document": bool(contract.document_filename),
+                "document_filename": contract.document_filename
+            })
+        
+        return ContractToolResult(
+            success=True,
+            message=f"📋 Found {len(contract_list)} contracts with billing prompt dates between {start_date} and {end_date}",
+            data={
+                "contracts": contract_list,
+                "count": len(contract_list),
+                "date_range": {
+                    "start_date": start_date,
+                    "end_date": end_date
+                }
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to get contracts by billing date: {str(e)}"
+        )
+
 class UpdateContractParams(BaseModel):
     client_name: str
     contract_id: Optional[int] = None
@@ -431,6 +680,7 @@ class UpdateContractParams(BaseModel):
     contract_type: Optional[str] = None
     original_amount: Optional[float] = None
     billing_frequency: Optional[str] = None
+    billing_prompt_next_date: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
 
@@ -446,13 +696,14 @@ def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] =
         
         # Test database connection
         try:
-            db.execute("SELECT 1")
+            from sqlalchemy import text
+            db.execute(text("SELECT 1"))
             print(f"🔧 update_contract_tool: Database connection test successful")
         except Exception as conn_error:
             print(f"🔧 update_contract_tool: Database connection test failed: {conn_error}")
             return ContractToolResult(
                 success=False,
-                message=f"❌ Database connection failed: {str(conn_error)}"
+                message=f"❌ Database connection failed while attempting to update the contract for {params.client_name}. Please try again later."
             )
         
         # Extract user_id from context
@@ -527,6 +778,17 @@ def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] =
             contract.billing_frequency = params.billing_frequency
             update_fields.append("billing_frequency")
         
+        if params.billing_prompt_next_date:
+            try:
+                contract.billing_prompt_next_date = datetime.strptime(params.billing_prompt_next_date, "%Y-%m-%d").date()
+                update_fields.append("billing_prompt_next_date")
+                print(f"🔧 update_contract_tool: Setting billing_prompt_next_date to '{params.billing_prompt_next_date}'")
+            except ValueError:
+                return ContractToolResult(
+                    success=False,
+                    message=f"❌ Invalid billing prompt date format. Please use YYYY-MM-DD format."
+                )
+        
         if params.status:
             contract.status = params.status
             update_fields.append("status")
@@ -582,7 +844,10 @@ def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] =
         )
         
     except Exception as e:
+        print(f"🔧 update_contract_tool: General exception occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return ContractToolResult(
             success=False,
-            message=f"❌ Failed to update contract: {str(e)}"
+            message=f"❌ Failed to update contract for {params.client_name}: {str(e)}"
         )

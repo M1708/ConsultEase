@@ -2,6 +2,7 @@ from pydantic import BaseModel, EmailStr, Field, validator
 from datetime import datetime, date
 from typing import Optional, List
 from decimal import Decimal
+from uuid import UUID
 
 
 # Client Schemas
@@ -293,3 +294,85 @@ class ExpenseDocumentResponse(BaseModel):
     receipt_link: Optional[str] = None
     file_size: Optional[int] = None
     uploaded_at: Optional[datetime] = None
+
+# Employee Schemas
+class EmployeeBase(BaseModel):
+    employee_number: Optional[str] = Field(None, max_length=50)
+    job_title: Optional[str] = Field(None, max_length=100)
+    department: Optional[str] = Field(None, max_length=100)
+    employment_type: str = Field(..., max_length=20)  # permanent, contract, intern, consultant
+    full_time_part_time: str = Field(..., max_length=10)  # full_time, part_time
+    committed_hours: Optional[int] = Field(None, ge=0, le=168)  # max 168 hours per week
+    hire_date: date
+    termination_date: Optional[date] = None
+    rate_type: Optional[str] = Field(None, max_length=20)  # hourly, salary, project_based
+    rate: Optional[Decimal] = Field(None, ge=0)
+    currency: str = Field(default="USD", max_length=3)
+    nda_file_link: Optional[str] = Field(None, max_length=500)
+    contract_file_link: Optional[str] = Field(None, max_length=500)
+
+    @validator('employment_type')
+    def validate_employment_type(cls, v):
+        valid_types = ['permanent', 'contract', 'intern', 'consultant']
+        if v not in valid_types:
+            raise ValueError(f'employment_type must be one of: {valid_types}')
+        return v
+
+    @validator('full_time_part_time')
+    def validate_full_time_part_time(cls, v):
+        valid_types = ['full_time', 'part_time']
+        if v not in valid_types:
+            raise ValueError(f'full_time_part_time must be one of: {valid_types}')
+        return v
+
+    @validator('rate_type')
+    def validate_rate_type(cls, v):
+        if v is not None:
+            valid_types = ['hourly', 'salary', 'project_based']
+            if v not in valid_types:
+                raise ValueError(f'rate_type must be one of: {valid_types}')
+        return v
+
+    @validator('termination_date')
+    def validate_termination_date(cls, v, values):
+        if v and 'hire_date' in values and values['hire_date']:
+            if v <= values['hire_date']:
+                raise ValueError('termination_date must be after hire_date')
+        return v
+
+class EmployeeCreate(EmployeeBase):
+    profile_id: UUID
+
+class EmployeeUpdate(BaseModel):
+    employee_number: Optional[str] = Field(None, max_length=50)
+    job_title: Optional[str] = Field(None, max_length=100)
+    department: Optional[str] = Field(None, max_length=100)
+    employment_type: Optional[str] = Field(None, max_length=20)
+    full_time_part_time: Optional[str] = Field(None, max_length=10)
+    committed_hours: Optional[int] = Field(None, ge=0, le=168)
+    hire_date: Optional[date] = None
+    termination_date: Optional[date] = None
+    rate_type: Optional[str] = Field(None, max_length=20)
+    rate: Optional[Decimal] = Field(None, ge=0)
+    currency: Optional[str] = Field(None, max_length=3)
+    nda_file_link: Optional[str] = Field(None, max_length=500)
+    contract_file_link: Optional[str] = Field(None, max_length=500)
+
+class EmployeeResponse(EmployeeBase):
+    employee_id: int
+    profile_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[UUID] = None
+    updated_by: Optional[UUID] = None
+
+    class Config:
+        from_attributes = True
+
+class EmployeeSearch(BaseModel):
+    search_term: Optional[str] = None
+    department: Optional[str] = None
+    employment_type: Optional[str] = None
+    full_time_part_time: Optional[str] = None
+    rate_type: Optional[str] = None
+    limit: int = Field(default=50, le=100)

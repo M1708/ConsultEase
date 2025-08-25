@@ -189,6 +189,39 @@ class UserStatus(str, Enum):
     suspended = "suspended"
     pending = "pending"
 
+class Employee(Base):
+    __tablename__ = "employees"
+    
+    employee_id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(UUID(as_uuid=True), ForeignKey("profiles.profile_id"), nullable=False)
+    employee_number = Column(String(50), unique=True)
+    job_title = Column(String(100))
+    department = Column(String(100))
+    employment_type = Column(String(20), nullable=False)  # permanent, contract, intern, consultant
+    full_time_part_time = Column(String(10), nullable=False)  # full_time, part_time
+    committed_hours = Column(Integer)  # hours per week/month
+    hire_date = Column(Date, nullable=True)  # Defaults to today's date in the tool
+    termination_date = Column(Date)
+    
+    # Compensation
+    rate_type = Column(String(20))  # hourly, salary, project_based
+    rate = Column(Numeric(10, 2))
+    currency = Column(String(3), default='USD')
+    
+    # Documents
+    nda_file_link = Column(String(500))
+    contract_file_link = Column(String(500))
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_by = Column(UUID(as_uuid=True), ForeignKey("profiles.profile_id"))
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("profiles.profile_id"))
+    
+    # Relationships
+    profile = relationship("User", foreign_keys=[profile_id])
+    created_by_user = relationship("User", foreign_keys=[created_by])
+    updated_by_user = relationship("User", foreign_keys=[updated_by])
+
 class User(Base):
     __tablename__ = "profiles"
     
