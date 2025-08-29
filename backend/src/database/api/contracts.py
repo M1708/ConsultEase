@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Contract, Client
-from backend.src.database.core.schemas import ContractCreate, ContractUpdate, ContractResponse, ContractDocumentResponse
-from backend.src.services.storage_service import SupabaseStorageService
-from backend.src.auth.dependencies import get_current_user, AuthenticatedUser
+from src.database.core.database import get_db
+from src.database.core.models import Contract, Client
+from src.database.core.schemas import ContractCreate, ContractUpdate, ContractResponse, ContractDocumentResponse
+from src.services.storage_service import SupabaseStorageService
+from src.auth.dependencies import get_current_user, AuthenticatedUser
 
 router = APIRouter()
 

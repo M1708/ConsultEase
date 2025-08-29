@@ -3,12 +3,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date
 from decimal import Decimal
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Client, Contract, ClientContact
-from backend.src.database.core.schemas import ClientCreate, ContractCreate, ClientContactCreate
-from backend.src.database.api.clients import create_client_internal, get_client_by_name
-from backend.src.database.api.contracts import create_contract_internal
-from backend.src.database.api.client_contacts import create_client_contact
+from src.database.core.database import get_db
+from src.database.core.models import Client, Contract, ClientContact
+from src.database.core.schemas import ClientCreate, ContractCreate, ClientContactCreate
+from src.database.api.clients import create_client_internal, get_client_by_name
+from src.database.api.contracts import create_contract_internal
+from src.database.api.client_contacts import create_client_contact
 
 class CreateClientParams(BaseModel):
     client_name: str
@@ -325,7 +325,7 @@ def smart_create_contract_tool(params: SmartContractParams, context: Dict[str, A
             )
         
         user_id = context['user_id']
-        print(f"🔍 smart_create_contract_tool: Using user_id: {user_id}")
+        print(f"🔍 smart_create_contract_tool: User authenticated successfully")
         
         # Search for clients that match the client name - more precise matching
         # First refresh the session to ensure we see any recently created clients
@@ -605,6 +605,71 @@ def get_all_contracts_tool(db: Session = None) -> ContractToolResult:
             message=f"❌ Failed to get all contracts: {str(e)}"
         )
 
+def get_all_clients_with_contracts_tool(db: Session = None) -> ContractToolResult:
+    """Tool for getting all clients with their contracts - comprehensive view"""
+    try:
+        if db is None:
+            db = next(get_db())
+        
+        # Get all clients
+        clients = db.query(Client).order_by(Client.client_name).all()
+        
+        clients_with_contracts = []
+        total_contracts = 0
+        
+        for client in clients:
+            # Get all contracts for this client
+            contracts = db.query(Contract).filter(Contract.client_id == client.client_id).all()
+            
+            contract_list = []
+            for contract in contracts:
+                contract_list.append({
+                    "contract_id": contract.contract_id,
+                    "contract_type": contract.contract_type,
+                    "status": contract.status,
+                    "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                    "current_amount": float(contract.current_amount) if contract.current_amount else None,
+                    "billing_frequency": contract.billing_frequency,
+                    "start_date": str(contract.start_date) if contract.start_date else None,
+                    "end_date": str(contract.end_date) if contract.end_date else None,
+                    "created_at": str(contract.created_at) if contract.created_at else None
+                })
+            
+            total_contracts += len(contract_list)
+            
+            clients_with_contracts.append({
+                "client_id": client.client_id,
+                "client_name": client.client_name,
+                "industry": client.industry,
+                "primary_contact_name": client.primary_contact_name,
+                "primary_contact_email": client.primary_contact_email,
+                "company_size": client.company_size,
+                "created_at": str(client.created_at) if client.created_at else None,
+                "contracts": contract_list,
+                "contract_count": len(contract_list)
+            })
+        
+        return ContractToolResult(
+            success=True,
+            message=f"📋 Found {len(clients_with_contracts)} clients with {total_contracts} total contracts",
+            data={
+                "clients_with_contracts": clients_with_contracts,
+                "summary": {
+                    "total_clients": len(clients_with_contracts),
+                    "total_contracts": total_contracts,
+                    "clients_with_contracts": len([c for c in clients_with_contracts if c["contract_count"] > 0]),
+                    "clients_without_contracts": len([c for c in clients_with_contracts if c["contract_count"] == 0]),
+                    "industries": list(set(c["industry"] for c in clients_with_contracts if c["industry"]))
+                }
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to get clients with contracts: {str(e)}"
+        )
+
 def get_contracts_by_billing_date_tool(start_date: str, end_date: str, db: Session = None) -> ContractToolResult:
     """Tool for getting contracts with billing prompt dates within a specific range"""
     try:
@@ -684,14 +749,141 @@ class UpdateContractParams(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
 
+class SearchContractsParams(BaseModel):
+    billing_frequency: Optional[str] = None
+    contract_type: Optional[str] = None
+    status: Optional[str] = None
+    client_name: Optional[str] = None
+    min_amount: Optional[float] = None
+    max_amount: Optional[float] = None
+    start_date_from: Optional[str] = None
+    start_date_to: Optional[str] = None
+
+def search_contracts_tool(params: SearchContractsParams, db: Session = None) -> ContractToolResult:
+    """Tool for searching and filtering contracts by various criteria"""
+    try:
+        if db is None:
+            db = next(get_db())
+        
+        # Start with base query joining Contract and Client
+        query = db.query(Contract).join(Client)
+        
+        # Apply filters based on provided parameters
+        filters_applied = []
+        
+        if params.billing_frequency:
+            query = query.filter(Contract.billing_frequency.ilike(f"%{params.billing_frequency}%"))
+            filters_applied.append(f"billing_frequency: {params.billing_frequency}")
+        
+        if params.contract_type:
+            query = query.filter(Contract.contract_type.ilike(f"%{params.contract_type}%"))
+            filters_applied.append(f"contract_type: {params.contract_type}")
+        
+        if params.status:
+            query = query.filter(Contract.status.ilike(f"%{params.status}%"))
+            filters_applied.append(f"status: {params.status}")
+        
+        if params.client_name:
+            query = query.filter(Client.client_name.ilike(f"%{params.client_name}%"))
+            filters_applied.append(f"client_name: {params.client_name}")
+        
+        if params.min_amount is not None:
+            query = query.filter(Contract.original_amount >= params.min_amount)
+            filters_applied.append(f"min_amount: ${params.min_amount}")
+        
+        if params.max_amount is not None:
+            query = query.filter(Contract.original_amount <= params.max_amount)
+            filters_applied.append(f"max_amount: ${params.max_amount}")
+        
+        if params.start_date_from:
+            try:
+                from datetime import datetime
+                start_date = datetime.strptime(params.start_date_from, "%Y-%m-%d").date()
+                query = query.filter(Contract.start_date >= start_date)
+                filters_applied.append(f"start_date_from: {params.start_date_from}")
+            except ValueError:
+                return ContractToolResult(
+                    success=False,
+                    message="❌ Invalid start_date_from format. Please use YYYY-MM-DD format."
+                )
+        
+        if params.start_date_to:
+            try:
+                from datetime import datetime
+                end_date = datetime.strptime(params.start_date_to, "%Y-%m-%d").date()
+                query = query.filter(Contract.start_date <= end_date)
+                filters_applied.append(f"start_date_to: {params.start_date_to}")
+            except ValueError:
+                return ContractToolResult(
+                    success=False,
+                    message="❌ Invalid start_date_to format. Please use YYYY-MM-DD format."
+                )
+        
+        # Execute query and get results
+        contracts = query.order_by(Contract.created_at.desc()).all()
+        
+        contract_list = []
+        for contract in contracts:
+            contract_list.append({
+                "contract_id": contract.contract_id,
+                "client_name": contract.client.client_name,
+                "contract_type": contract.contract_type,
+                "status": contract.status,
+                "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                "current_amount": float(contract.current_amount) if contract.current_amount else None,
+                "billing_frequency": contract.billing_frequency,
+                "billing_prompt_next_date": str(contract.billing_prompt_next_date) if contract.billing_prompt_next_date else None,
+                "termination_date": str(contract.termination_date) if contract.termination_date else None,
+                "amendments": contract.amendments,
+                "notes": contract.notes,
+                "start_date": str(contract.start_date) if contract.start_date else None,
+                "end_date": str(contract.end_date) if contract.end_date else None,
+                "has_document": bool(contract.document_filename),
+                "document_filename": contract.document_filename,
+                "created_at": str(contract.created_at) if contract.created_at else None
+            })
+        
+        # Create summary message
+        if len(filters_applied) == 0:
+            message = f"📋 Found {len(contract_list)} contracts (no filters applied)"
+        else:
+            message = f"📋 Found {len(contract_list)} contracts matching criteria: {', '.join(filters_applied)}"
+        
+        return ContractToolResult(
+            success=True,
+            message=message,
+            data={
+                "contracts": contract_list,
+                "count": len(contract_list),
+                "filters_applied": filters_applied,
+                "summary": {
+                    "total_contracts": len(contract_list),
+                    "contract_types": list(set(c["contract_type"] for c in contract_list if c["contract_type"])),
+                    "billing_frequencies": list(set(c["billing_frequency"] for c in contract_list if c["billing_frequency"])),
+                    "statuses": list(set(c["status"] for c in contract_list if c["status"])),
+                    "clients": list(set(c["client_name"] for c in contract_list if c["client_name"]))
+                }
+            }
+        )
+        
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to search contracts: {str(e)}"
+        )
+
 def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] = None, db: Session = None) -> ContractToolResult:
     """Tool for updating existing contracts by client name"""
+    db_created = False
     try:
         from datetime import datetime
         
         # Always create a fresh database session to avoid session closure issues
-        db = next(get_db())
-        print(f"🔧 update_contract_tool: Created fresh database session")
+        if db is None:
+            db = next(get_db())
+            db_created = True
+            print(f"🔧 update_contract_tool: Created fresh database session")
+        
         print(f"🔧 update_contract_tool: Database session info - is_active: {db.is_active}")
         
         # Test database connection
@@ -851,3 +1043,11 @@ def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] =
             success=False,
             message=f"❌ Failed to update contract for {params.client_name}: {str(e)}"
         )
+    finally:
+        # Ensure database session is properly closed to prevent timeouts
+        if db_created and db is not None:
+            try:
+                db.close()
+                print(f"🔧 update_contract_tool: Database session closed successfully")
+            except Exception as close_error:
+                print(f"🔧 update_contract_tool: Error closing database session: {close_error}")

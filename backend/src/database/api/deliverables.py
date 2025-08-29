@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Deliverable, Client, Contract
-from backend.src.database.core.schemas import DeliverableCreate, DeliverableUpdate, DeliverableResponse
-from backend.src.auth.dependencies import get_current_user, AuthenticatedUser
+from src.database.core.database import get_db
+from src.database.core.models import Deliverable, Client, Contract
+from src.database.core.schemas import DeliverableCreate, DeliverableUpdate, DeliverableResponse
+from src.auth.dependencies import get_current_user, AuthenticatedUser
 
 router = APIRouter()
 
@@ -71,7 +71,7 @@ def search_deliverables(search_term: str, db: Session = Depends(get_db)):
 
 def get_deliverable_by_name(deliverable_name: str, db: Session) -> Deliverable:
     """Helper function to get deliverable by name (for use in tools) - with intelligent client name matching"""
-    from backend.src.database.core.models import Client, Contract
+    from  src.database.core.models import Client, Contract
     
     # First try direct deliverable name match
     deliverable = db.query(Deliverable).filter(Deliverable.name.ilike(f"%{deliverable_name}%")).first()
@@ -100,7 +100,7 @@ def get_deliverable_by_name(deliverable_name: str, db: Session) -> Deliverable:
 
 def search_deliverables_with_client_info(search_term: str, db: Session) -> List[dict]:
     """Helper function to search deliverables with client and contract information"""
-    from backend.src.database.core.models import Client, Contract
+    from  src.database.core.models import Client, Contract
     
     # More flexible search - split search term into words for better matching
     search_words = search_term.lower().split()

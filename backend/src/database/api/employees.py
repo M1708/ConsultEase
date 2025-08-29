@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Employee, User
-from backend.src.database.core.schemas import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeSearch
-from backend.src.auth.dependencies import get_current_user
-from backend.src.auth.dependencies import AuthenticatedUser
+from src.database.core.database import get_db
+from src.database.core.models import Employee, User
+from src.database.core.schemas import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeSearch
+from src.auth.dependencies import get_current_user
+from src.auth.dependencies import AuthenticatedUser
 from datetime import datetime
 
 router = APIRouter(prefix="/employees", tags=["employees"])

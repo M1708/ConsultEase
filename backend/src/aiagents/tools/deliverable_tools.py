@@ -3,11 +3,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date
 from decimal import Decimal
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Client, Contract, Deliverable
-from backend.src.database.core.schemas import DeliverableCreate
-from backend.src.database.api.clients import get_client_by_name
-from backend.src.database.api.deliverables import create_deliverable
+from src.database.core.database import get_db
+from src.database.core.models import Client, Contract, Deliverable
+from src.database.core.schemas import DeliverableCreate
+from src.database.api.clients import get_client_by_name
+from src.database.api.deliverables import create_deliverable
 
 class DeliverableToolResult(BaseModel):
     success: bool
@@ -328,7 +328,7 @@ def search_deliverables_tool(search_term: str, db: Session = None) -> Deliverabl
             db = next(get_db())
         
         # Use the existing API function for smart search
-        from backend.src.database.api.deliverables import search_deliverables_with_client_info
+        from  src.database.api.deliverables import search_deliverables_with_client_info
         
         deliverables = search_deliverables_with_client_info(search_term, db)
         

@@ -1,15 +1,15 @@
 from datetime import date, datetime
 from decimal import Decimal
-from backend.src.database.core.models import TimeEntry
-from backend.src.database.core.schemas import TimeEntryCreate
-from backend.src.database.core.database import get_db
-from backend.src.database.api.time_entries import create_time_entry
-from backend.src.database.api.deliverables import get_deliverable_by_name, search_deliverables_with_client_info
-from backend.src.database.api.clients import get_client_by_name
+from src.database.core.models import TimeEntry
+from src.database.core.schemas import TimeEntryCreate
+from src.database.core.database import get_db
+from src.database.api.time_entries import create_time_entry
+from src.database.api.deliverables import get_deliverable_by_name, search_deliverables_with_client_info
+from src.database.api.clients import get_client_by_name
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from backend.src.aiagents.tools.contract_tools import ContractToolResult
+from  src.aiagents.tools.contract_tools import ContractToolResult
 
 
 class CreateTimeEntryParams(BaseModel):
@@ -137,7 +137,7 @@ def smart_create_time_entry_tool(params: SmartTimeEntryParams, db: Session = Non
         
         if not deliverable:
             # Smart search: Check if we can find clients that match the project name
-            from backend.src.database.core.models import Contract, Deliverable as DeliverableModel, Client
+            from  src.database.core.models import Contract, Deliverable as DeliverableModel, Client
             
             # Search for multiple clients that might match (e.g., "Solana" → "Solana Inc", "Solana Corp")
             search_words = params.project_name.lower().split()

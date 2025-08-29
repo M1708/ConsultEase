@@ -1,13 +1,13 @@
 from openai import OpenAI
 from typing import Dict, Any, List, Callable
-from backend.src.aiagents.prompts import DeliverablePrompts
-from backend.src.aiagents.tools.deliverable_tools import (
+
+from src.aiagents.tools.deliverable_tools import (
     smart_create_deliverable_tool, get_deliverables_by_client_tool, 
     get_deliverables_by_contract_tool, search_deliverables_tool,
     SmartDeliverableParams, DeliverableToolResult
 )
-from backend.src.aiagents.guardrails.input_guardrails import input_sanitization_guardrail
-from backend.src.aiagents.guardrails.output_guardrails import output_validation_guardrail
+from  src.aiagents.guardrails.input_guardrails import input_sanitization_guardrail
+from  src.aiagents.guardrails.output_guardrails import output_validation_guardrail
 import json
 import os
 
@@ -15,7 +15,7 @@ class DeliverableAgent:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.name = "Milo"
-        self.instructions = DeliverablePrompts.SYSTEM_INSTRUCTIONS
+        self.instructions = "You are Milo, an AI assistant."
         self.model = "gpt-4o-mini"
         
         # Dynamic tool mapping - no hardcoded if-else logic

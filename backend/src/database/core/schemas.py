@@ -376,3 +376,31 @@ class EmployeeSearch(BaseModel):
     full_time_part_time: Optional[str] = None
     rate_type: Optional[str] = None
     limit: int = Field(default=50, le=100)
+
+# User (Profile) Schemas
+class UserCreate(BaseModel):
+    email: EmailStr
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    role: Optional[str] = "viewer" # Assuming default role
+    status: Optional[str] = "active" # Assuming default status
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+
+class UserResponse(BaseModel):
+    profile_id: UUID
+    email: EmailStr
+    first_name: Optional[str]
+    last_name: Optional[str]
+    role: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

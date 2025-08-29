@@ -1,9 +1,9 @@
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Employee, User
-from backend.src.database.core.schemas import EmployeeCreate, EmployeeUpdate
+from src.database.core.database import get_db
+from src.database.core.models import Employee, User
+from src.database.core.schemas import EmployeeCreate, EmployeeUpdate
 from datetime import datetime, date
 from decimal import Decimal
 

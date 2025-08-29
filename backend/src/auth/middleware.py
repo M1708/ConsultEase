@@ -12,6 +12,10 @@ supabase = create_client(supabase_url, supabase_key)
 async def auth_middleware(request: Request, call_next):
     """Global authentication middleware"""
     
+    if request.method == "OPTIONS":
+        response = await call_next(request)
+        return response
+
     # Skip auth for certain paths
     skip_auth_paths = [
         "/",
@@ -19,6 +23,7 @@ async def auth_middleware(request: Request, call_next):
         "/docs",
         "/openapi.json",
         "/api/auth/profile/",  # This specific endpoint bypasses normal auth
+        "/api/chat/greeting",  # Fast greeting endpoint without auth
     ]
     
     if any(request.url.path.startswith(path) for path in skip_auth_paths):

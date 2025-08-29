@@ -1,5 +1,5 @@
-from backend.src.aiagents.workflows.base_workflow import BaseWorkflow, WorkflowState, WorkflowStatus
-from backend.src.aiagents.contract_agent import ContractAgent
+from  src.aiagents.workflows.base_workflow import BaseWorkflow, WorkflowState, WorkflowStatus
+from  src.aiagents.contract_agent import ContractAgent
 from langgraph.graph import END
 
 
@@ -52,12 +52,12 @@ class ClientOnboardingWorkflow(BaseWorkflow):
             db = state.data.get("database")
             if not db:
                 # Fallback to creating a new session
-                from backend.src.database.core.database import get_db
+                from  src.database.core.database import get_db
                 db = next(get_db())
             
             # Create client directly using the database API instead of going through the agent
-            from backend.src.database.api.clients import create_client
-            from backend.src.database.core.schemas import ClientCreate
+            from  src.database.api.clients import create_client
+            from  src.database.core.schemas import ClientCreate
             
             client_data = ClientCreate(
                 client_name=client_info.get("client_name"),

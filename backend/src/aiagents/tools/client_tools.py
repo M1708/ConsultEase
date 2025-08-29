@@ -1,9 +1,9 @@
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import Client, User
-from backend.src.aiagents.tools.contract_tools import get_client_by_name
+from src.database.core.database import get_db
+from src.database.core.models import Client, User
+from src.aiagents.tools.contract_tools import get_client_by_name
 
 class ClientToolResult:
     """Result object for client tool operations"""
@@ -64,7 +64,7 @@ def update_client_tool(params: UpdateClientParams, context: Dict[str, Any] = Non
         print(f"🔧 update_client_tool: Context received: {context is not None}")
         if context:
             print(f"🔧 update_client_tool: Context keys: {list(context.keys())}")
-            print(f"🔧 update_client_tool: Context user_id: {context.get('user_id')}")
+            print(f"🔧 update_client_tool: Context contains user_id: {bool(context.get('user_id'))}")
         
         if not context or 'user_id' not in context:
             return ClientToolResult(
@@ -73,7 +73,7 @@ def update_client_tool(params: UpdateClientParams, context: Dict[str, Any] = Non
             )
         
         user_id = context['user_id']
-        print(f"🔧 update_client_tool: Using user_id: {user_id}")
+        print(f"🔧 update_client_tool: User authenticated successfully")
         
         # Find client by name
         client = get_client_by_name(params.client_name, db)
@@ -132,8 +132,19 @@ def update_client_tool(params: UpdateClientParams, context: Dict[str, Any] = Non
                 message=f"❌ No fields to update for client '{params.client_name}'."
             )
         
-        # Set audit fields
-        client.updated_by = user_id
+        # Set audit fields - convert user_id to UUID if needed
+        import uuid
+        if isinstance(user_id, int):
+            # For testing, create a deterministic UUID from the integer
+            client.updated_by = uuid.UUID(int=user_id)
+        elif isinstance(user_id, str):
+            try:
+                client.updated_by = uuid.UUID(user_id)
+            except ValueError:
+                # If it's not a valid UUID string, create one from hash
+                client.updated_by = uuid.uuid5(uuid.NAMESPACE_OID, user_id)
+        else:
+            client.updated_by = user_id
         client.updated_at = datetime.utcnow()
         
         print(f"🔧 update_client_tool: About to commit changes. Update fields: {update_fields}")

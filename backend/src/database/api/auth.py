@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends, Header
 from sqlalchemy.orm import Session
 from typing import Optional
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import User
-from backend.src.services.auth_service import verify_supabase_jwt
+from src.database.core.database import get_db
+from src.database.core.models import User
+from src.services.auth_service import verify_supabase_jwt
 from datetime import datetime
 import uuid
 

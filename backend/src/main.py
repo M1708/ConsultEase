@@ -2,10 +2,10 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from backend.src.database.core.database import get_db, engine, Base
-from backend.src.database.api import clients, contracts, client_contacts, deliverables, time_entries, expenses, employees, chat, chat_sessions
-from backend.src.auth import routes as auth_routes
-from backend.src.auth.middleware import auth_middleware
+from src.database.core.database import get_db, engine, Base
+from src.database.api import clients, contracts, client_contacts, deliverables, time_entries, expenses, employees, chat, chat_sessions
+from src.auth import routes as auth_routes
+from src.auth.middleware import auth_middleware
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -53,7 +53,7 @@ def health_check(db: Session = Depends(get_db)):
         db.execute(text('SELECT 1'))
         
         # Test Redis connection
-        from backend.src.auth.session_manager import SessionManager
+        from  src.auth.session_manager import SessionManager
         session_manager = SessionManager()
         session_manager.redis_client.ping()
         

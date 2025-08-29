@@ -2,9 +2,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from supabase import create_client, Client
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import User
-from backend.src.auth.session_manager import SessionManager
+from src.database.core.database import get_db
+from src.database.core.models import User
+from src.auth.session_manager import SessionManager
 import os
 
 # Initialize Supabase client

@@ -1,17 +1,17 @@
 from openai import OpenAI
-from backend.src.aiagents.prompts import TimeTrackerPrompts
-from backend.src.aiagents.tools.time_tools import (
+
+from src.aiagents.tools.time_tools import (
     create_time_entry_tool, get_timesheet_tool, CreateTimeEntryParams,
     search_projects_tool, smart_create_time_entry_tool, SmartTimeEntryParams
 )
-from backend.src.aiagents.tools.contract_tools import ContractToolResult
-from backend.src.aiagents.guardrails.input_guardrails import input_sanitization_guardrail
-from backend.src.aiagents.guardrails.output_guardrails import output_validation_guardrail
+from src.aiagents.tools.contract_tools import ContractToolResult
+from src.aiagents.guardrails.input_guardrails import input_sanitization_guardrail
+from src.aiagents.guardrails.output_guardrails import output_validation_guardrail
 from typing import Dict, Any, List
 from datetime import date, timedelta
 from decimal import Decimal
-from backend.src.database.core.models import TimeEntry
-from backend.src.database.core.schemas import TimeEntryCreate
+from src.database.core.models import TimeEntry
+from src.database.core.schemas import TimeEntryCreate
 from typing import Optional
 import json
 import os
@@ -20,7 +20,7 @@ class TimeTrackerAgent:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.name = "Milo"
-        self.instructions = TimeTrackerPrompts.SYSTEM_INSTRUCTIONS
+        self.instructions = "You are Milo, an AI assistant."
         self.model = "gpt-4o-mini"
         
         # Dynamic tool mapping - no hardcoded if-else logic

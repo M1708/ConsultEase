@@ -43,9 +43,9 @@ def verify_supabase_jwt(token: str) -> Dict[str, Any]:
 from fastapi import HTTPException, Header, Depends
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
-from backend.src.database.core.database import get_db
-from backend.src.database.core.models import User
-from backend.src.services.auth_service import verify_supabase_jwt
+from src.database.core.database import get_db
+from src.database.core.models import User
+from src.services.auth_service import verify_supabase_jwt
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
