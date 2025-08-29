@@ -28,7 +28,7 @@ build/
 *.egg-info/
 
 # Test directories
-test/
+tests/
 backend/test/
 **/test/
 
