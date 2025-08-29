@@ -1,3 +1,7 @@
 pip3 install uv
 uv init
 uv add <package>
+
+git add .
+git commit -m ""
+git push origin main

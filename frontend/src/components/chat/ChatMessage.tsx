@@ -36,7 +36,7 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
         >
           {!isUser && (
             <div className="flex items-center gap-2 mb-2 text-xs">
-              <span className="font-medium text-gray-600">{message.agent}</span>
+              <span className="font-medium text-gray-600">Milo</span>
               {message.success ? (
                 <Check className="h-3 w-3 text-green-500" />
               ) : (

@@ -1,5 +1,9 @@
 import { User } from "@/types/user";
-import { SendMessageRequest, AgentCapabilities, ChatResponse } from "@/types/chat";
+import {
+  SendMessageRequest,
+  AgentCapabilities,
+  ChatResponse,
+} from "@/types/chat";
 import { supabase } from "./supabase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -63,9 +67,138 @@ class ApiClient {
     },
   };
 
+  private async sendFastGreeting(
+    request: SendMessageRequest
+  ): Promise<ChatResponse> {
+    // Use minimal headers for ultra-fast greeting (no auth to avoid middleware)
+    const response = await fetch(`${API_BASE_URL}/api/chat/greeting`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      // Fallback to regular message endpoint if fast greeting fails
+      console.log("Fast greeting failed, falling back to regular endpoint");
+      return this.request<ChatResponse>("/api/chat/message", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    }
+
+    return response.json();
+  }
+
+  private async sendFastClients(
+    request: SendMessageRequest
+  ): Promise<ChatResponse> {
+    // Use authenticated request for client data
+    const headers = await this.getAuthHeaders();
+    const response = await fetch(`${API_BASE_URL}/api/chat/clients`, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      // Fallback to regular message endpoint if fast clients fails
+      console.log("Fast clients failed, falling back to regular endpoint");
+      return this.request<ChatResponse>("/api/chat/message", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    }
+
+    return response.json();
+  }
+
   // Chat API
   chat = {
     sendMessage: async (request: SendMessageRequest): Promise<ChatResponse> => {
+      // Check if it's a greeting message for ultra-fast response
+      const message = request.message.toLowerCase().trim();
+      console.log(`🔍 FRONTEND: Checking message: "${message}"`);
+
+      const greetings = ["hi", "hello", "hey", "hola", "howdy", "greetings"];
+      const greetingPhrases = [
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "good night",
+      ];
+
+      const isSimpleGreeting = greetings.includes(message);
+      const isPhraseGreeting = greetingPhrases.some((phrase) =>
+        message.includes(phrase)
+      );
+      const isGreeting = isSimpleGreeting || isPhraseGreeting;
+
+      console.log(
+        `🔍 FRONTEND: Simple: ${isSimpleGreeting}, Phrase: ${isPhraseGreeting}, Final: ${isGreeting}`
+      );
+
+      if (isGreeting) {
+        console.log("🚀 FRONTEND: Using fast greeting endpoint!");
+        const startTime = performance.now();
+        try {
+          const result = await this.sendFastGreeting(request);
+          const endTime = performance.now();
+          console.log(
+            `⚡ FRONTEND: Fast greeting completed in ${endTime - startTime}ms`
+          );
+          return result;
+        } catch (error) {
+          const endTime = performance.now();
+          console.log(
+            `❌ FRONTEND: Fast greeting failed after ${endTime - startTime}ms:`,
+            error
+          );
+          throw error;
+        }
+      }
+
+      // Check if it's a client listing query for ultra-fast response
+      const clientQueries = [
+        "show all clients",
+        "list all clients",
+        "get all clients",
+        "all clients",
+        "show clients",
+        "list clients",
+        "get clients",
+        "clients list",
+        "what clients do we have",
+        "who are our clients",
+        "client list",
+      ];
+
+      const isClientQuery = clientQueries.some((query) =>
+        message.includes(query)
+      );
+
+      if (isClientQuery) {
+        console.log("🚀 FRONTEND: Using fast clients endpoint!");
+        const startTime = performance.now();
+        try {
+          const result = await this.sendFastClients(request);
+          const endTime = performance.now();
+          console.log(
+            `⚡ FRONTEND: Fast clients completed in ${endTime - startTime}ms`
+          );
+          return result;
+        } catch (error) {
+          const endTime = performance.now();
+          console.log(
+            `❌ FRONTEND: Fast clients failed after ${endTime - startTime}ms:`,
+            error
+          );
+          throw error;
+        }
+      }
+
+      console.log("🔄 FRONTEND: Using regular endpoint");
       return this.request<ChatResponse>("/api/chat/message", {
         method: "POST",
         body: JSON.stringify(request),

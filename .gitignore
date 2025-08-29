@@ -31,3 +31,6 @@ build/
 test/
 backend/test/
 **/test/
+
+# Old files
+*.old
