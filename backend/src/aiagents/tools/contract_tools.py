@@ -405,6 +405,13 @@ def smart_create_contract_tool(params: SmartContractParams, context: Dict[str, A
             except ValueError:
                 pass
         
+        billing_prompt_next_date_obj = None
+        if params.billing_prompt_next_date:
+            try:
+                billing_prompt_next_date_obj = date.fromisoformat(params.billing_prompt_next_date)
+            except ValueError:
+                pass
+
         # Create contract using the existing API
         contract_data = ContractCreate(
             client_id=client.client_id,
@@ -414,6 +421,7 @@ def smart_create_contract_tool(params: SmartContractParams, context: Dict[str, A
             original_amount=params.original_amount,
             current_amount=params.original_amount,
             billing_frequency=params.billing_frequency,
+            billing_prompt_next_date=billing_prompt_next_date_obj,
             status="draft",
             notes=params.notes
         )

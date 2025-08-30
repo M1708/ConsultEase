@@ -143,7 +143,8 @@ def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
             original_amount=kwargs.get('original_amount'),
             start_date=kwargs.get('start_date'),
             end_date=kwargs.get('end_date'),
-            billing_frequency='Monthly'
+            billing_frequency='Monthly',
+            billing_prompt_next_date=kwargs.get('billing_prompt_next_date')
         )
         
         contract_result = smart_create_contract_tool(contract_params, context, db)

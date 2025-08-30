@@ -7,6 +7,7 @@ class UserProfileResponse(BaseModel):
     email: str
     first_name: Optional[str]
     last_name: Optional[str]
+    full_name: Optional[str] = None
     role: str
     status: str
     phone: Optional[str]
@@ -15,12 +16,6 @@ class UserProfileResponse(BaseModel):
     preferences: Optional[Dict[str, Any]]
     created_at: datetime
     updated_at: datetime
-    
-    @property
-    def full_name(self) -> str:
-        if self.first_name and self.last_name:
-            return f"{self.first_name} {self.last_name}"
-        return self.first_name or self.last_name or self.email
     
     class Config:
         from_attributes = True

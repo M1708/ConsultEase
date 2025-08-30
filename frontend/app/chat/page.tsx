@@ -177,7 +177,11 @@ export default function ChatPage() {
         if (inputMessage.trim()) {
           const messageToSend = inputMessage.trim();
           setInputMessage(""); // Clear input immediately for instant feedback
-          await sendMessage(messageToSend);
+          if (['hi', 'hello', 'hey'].includes(messageToSend.toLowerCase())) {
+            await sendMessage(`${messageToSend} my name is ${user?.first_name}`);
+          } else {
+            await sendMessage(messageToSend);
+          }
           // Auto-save after sending message
           await saveChatSession();
         }
@@ -546,8 +550,6 @@ export default function ChatPage() {
             <div className="absolute inset-y-0 left-1/2 transform -translate-x-1/2 w-0.5 bg-white opacity-60"></div>
           </div>
 
-          {/* Right Side Spacer */}
-          <div className="flex-1"></div>
         </div>
       </div>
     </ProtectedRoute>

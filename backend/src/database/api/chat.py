@@ -279,13 +279,14 @@ async def send_chat_message(request: Request):
         # ULTRA-FAST greeting detection BEFORE any dependencies
         print(f"🔥 CHAT API: Processing message: '{message_content}'")
         message_lower = message_content.lower().strip()
+        print(f"message_lower: {message_lower}")
         
         # Simple and explicit greeting detection
         simple_greetings = ["hi", "hello", "hey", "hola", "howdy", "greetings"]
         greeting_phrases = ["good morning", "good afternoon", "good evening", "good night"]
         
         is_greeting = (
-            message_lower in simple_greetings or 
+            any(message_lower.startswith(g) for g in simple_greetings) or
             any(phrase in message_lower for phrase in greeting_phrases)
         )
         
@@ -293,6 +294,7 @@ async def send_chat_message(request: Request):
             print(f"🔥 CHAT API: ULTRA-FAST GREETING PATH!")
             # Try to get personalized greeting with auth
             try:
+                print("Inside try block of ultra-fast greeting")
                 from src.database.core.database import get_db
                 from src.auth.dependencies import get_current_user
                 from fastapi.security import HTTPAuthorizationCredentials
@@ -308,8 +310,15 @@ async def send_chat_message(request: Request):
                     current_user = await get_current_user(credentials, db)
                     
                     # Extract first name for personalized greeting
-                    user_name = current_user.user.full_name or current_user.user.email
-                    first_name = user_name.split()[0] if user_name else ''
+                    first_name = ''
+                    if "my name is" in message_lower:
+                        try:
+                            first_name = message_lower.split("my name is")[1].strip()
+                        except:
+                            pass
+                    if not first_name:
+                        user_name = f"{current_user.user.first_name} {current_user.user.last_name}" if current_user.user.first_name and current_user.user.last_name else current_user.user.first_name or current_user.user.last_name or current_user.user.email
+                        first_name = user_name.split()[0] if user_name else ''
                     
                     if first_name:
                         greeting_response = f"Hello {first_name}! How can I help you today?"
@@ -435,10 +444,11 @@ async def send_chat_message(request: Request):
         else:
             # Create new conversation state
             initial_message = HumanMessage(content=message_content)
+            user_full_name = f"{current_user.user.first_name} {current_user.user.last_name}" if current_user.user.first_name and current_user.user.last_name else current_user.user.first_name or current_user.user.last_name or current_user.user.email
             initial_state = create_initial_state(
                 user_id=str(current_user.user_id),
                 session_id=current_user.session_id,
-                user_name=current_user.user.full_name or current_user.user.email,
+                user_name=user_full_name,
                 user_role=current_user.role,
                 initial_message=initial_message
             )

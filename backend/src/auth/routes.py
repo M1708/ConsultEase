@@ -49,11 +49,13 @@ async def get_user_profile_by_id(
             detail="User not found"
         )
     
+    full_name = f"{user.first_name} {user.last_name}" if user.first_name and user.last_name else user.first_name or user.last_name or user.email
     return UserProfileResponse(
         user_id=str(user.user_id),
         email=user.email,
         first_name=user.first_name,
         last_name=user.last_name,
+        full_name=full_name,
         role=user.role.value,
         status=user.status.value,
         phone=user.phone,
