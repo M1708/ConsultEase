@@ -15,11 +15,11 @@ export const useChat = () => {
   } = useChatStore();
 
   const handleSendMessage = useCallback(
-    async (message: string) => {
+    async (message: string, displayMessage?: string) => {
       if (!message.trim()) return;
 
       try {
-        await sendMessage(message.trim());
+        await sendMessage(message.trim(), displayMessage);
       } catch (error) {
         console.error("Failed to send message:", error);
       }

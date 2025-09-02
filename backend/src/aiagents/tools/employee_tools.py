@@ -7,15 +7,15 @@ from src.database.core.schemas import EmployeeCreate, EmployeeUpdate
 from datetime import datetime, date
 from decimal import Decimal
 
-class EmployeeToolResult:
+class EmployeeToolResult(BaseModel):
     """Result object for employee tool operations"""
-    def __init__(self, success: bool, message: str, data: Optional[Dict[str, Any]] = None):
-        self.success = success
-        self.message = message
-        self.data = data
+    success: bool
+    message: str
+    data: Optional[Dict[str, Any]] = None
 
 class CreateEmployeeParams(BaseModel):
-    profile_id: str
+    employee_name: Optional[str] = None
+    profile_id: Optional[str] = None
     employee_number: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
@@ -26,6 +26,7 @@ class CreateEmployeeParams(BaseModel):
     termination_date: Optional[str] = None
     rate_type: Optional[str] = None  # hourly, salary, project_based
     rate: Optional[float] = None
+    salary: Optional[float] = None
     currency: str = "USD"
     nda_file_link: Optional[str] = None
     contract_file_link: Optional[str] = None
@@ -96,6 +97,149 @@ def check_employee_exists_tool(profile_id: str, db: Session = None) -> EmployeeT
     finally:
         if db:
             db.close()
+
+def parse_employee_details_from_message(message: str) -> Dict[str, Any]:
+    """Enhanced parser for employee details from natural language user message"""
+    details = {}
+    import re
+    
+    # Parse employment type with more variations
+    message_lower = message.lower()
+    if any(word in message_lower for word in ["permanent", "is permanent", "permanent employee"]):
+        details["employment_type"] = "permanent"
+    elif any(word in message_lower for word in ["contract", "contractor", "contract worker"]):
+        details["employment_type"] = "contract"
+    elif any(word in message_lower for word in ["intern", "internship", "intern position"]):
+        details["employment_type"] = "intern"
+    elif any(word in message_lower for word in ["consultant", "consulting", "freelancer"]):
+        details["employment_type"] = "consultant"
+    
+    # Parse full-time/part-time with more variations
+    if any(word in message_lower for word in ["fulltime", "full-time", "full time", "is fulltime"]):
+        details["full_time_part_time"] = "full_time"
+    elif any(word in message_lower for word in ["part-time", "parttime", "part time", "is part-time"]):
+        details["full_time_part_time"] = "part_time"
+    
+    # Enhanced job title extraction
+    job_title_patterns = [
+        r'(?:is a|as a|as an|is an|works as|position as|role as|job title is|title is)\s+([a-zA-Z\s]+?)(?:\s*,|\s*in|\s*at|\s*for|\s*with|\s*and|$)',
+        r'(?:senior|junior|lead|principal|chief|head of|director of)\s+([a-zA-Z\s]+?)(?:\s*,|\s*in|\s*at|\s*for|\s*with|\s*and|$)',
+        r'([a-zA-Z\s]*(?:researcher|scientist|engineer|manager|developer|analyst|specialist|coordinator|assistant|director|lead))\s*(?:,|\s*in|\s*at|\s*for|\s*with|\s*and|$)'
+    ]
+    
+    for pattern in job_title_patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            job_title = match.group(1).strip()
+            # Clean up common words that shouldn't be in job titles
+            job_title = re.sub(r'\b(the|and|or|in|at|for|with|is|a|an)\b', '', job_title, flags=re.IGNORECASE).strip()
+            if job_title and len(job_title) > 2:
+                details["job_title"] = ' '.join(word.capitalize() for word in job_title.split())
+                break
+    
+    # Enhanced department extraction
+    department_patterns = [
+        r'(?:in|works in|department is|dept is|from)\s+(?:the\s+)?([a-zA-Z\s]+?)\s+department',
+        r'department[:\s]+([a-zA-Z\s]+?)(?:\s*,|\s*and|\s*with|$)',
+        r'(?:research|marketing|engineering|sales|hr|human resources|finance|operations|it|technology)\b'
+    ]
+    
+    for pattern in department_patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            if len(match.groups()) > 0:
+                department = match.group(1).strip()
+            else:
+                department = match.group(0).strip()
+            
+            # Clean and capitalize department name
+            department = re.sub(r'\b(the|and|or|in|at|for|with|is|a|an)\b', '', department, flags=re.IGNORECASE).strip()
+            if department and len(department) > 1:
+                details["department"] = ' '.join(word.capitalize() for word in department.split())
+                break
+    
+    # Enhanced salary/rate parsing with more patterns
+    salary_patterns = [
+        r'(?:monthly salary|salary|monthly)\s+(?:is|of)?\s*\$?([\d,]+)',
+        r'\$?([\d,]+)\s*(?:per month|monthly|/month)',
+        r'\$?([\d,]+)\s*(?:per hour|hourly|/hour|/hr)',
+        r'\$?([\d,]+)\s*(monthly|yearly|hourly|annually)'
+    ]
+    
+    for pattern in salary_patterns:
+        salary_match = re.search(pattern, message_lower)
+        if salary_match:
+            amount = float(salary_match.group(1).replace(',', ''))
+            
+            # Determine rate type from context
+            if len(salary_match.groups()) > 1:
+                period = salary_match.group(2)
+            else:
+                # Infer from context
+                if any(word in message_lower for word in ["monthly", "per month", "/month"]):
+                    period = "monthly"
+                elif any(word in message_lower for word in ["hourly", "per hour", "/hour", "/hr"]):
+                    period = "hourly"
+                elif any(word in message_lower for word in ["yearly", "annually", "per year"]):
+                    period = "yearly"
+                else:
+                    period = "monthly"  # default
+            
+            details["rate"] = amount
+            if period in ["monthly", "salary"]:
+                details["rate_type"] = "salary"
+            elif period == "yearly":
+                details["rate_type"] = "salary"
+                details["rate"] = amount / 12  # Convert yearly to monthly
+            elif period == "hourly":
+                details["rate_type"] = "hourly"
+            break
+    
+    # Enhanced hire date parsing with multiple patterns
+    date_patterns = [
+        r'(?:joined us on|hired on|starting|starts|hire date|start date|begins)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})',
+        r'(?:joined us on|hired on|starting|starts|hire date|start date|begins)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})',
+        r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})',
+        r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})'
+    ]
+    
+    month_map = {"jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
+                 "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"}
+    
+    for pattern in date_patterns:
+        date_match = re.search(pattern, message, re.IGNORECASE)
+        if date_match:
+            groups = date_match.groups()
+            
+            # Handle different group orders
+            if groups[0].isdigit():  # Day first pattern
+                day = groups[0]
+                month = groups[1]
+                year = groups[2]
+            else:  # Month first pattern
+                month = groups[0]
+                day = groups[1]
+                year = groups[2]
+            
+            month_num = month_map.get(month.lower()[:3])
+            if month_num:
+                details["hire_date"] = f"{year}-{month_num}-{day.zfill(2)}"
+                break
+    
+    # Parse employee number if mentioned
+    emp_number_patterns = [
+        r'(?:employee number|emp number|employee id|emp id|staff id)\s*:?\s*([A-Z]*\d+)',
+        r'(?:as|with id|id)\s+([A-Z]{2,4}\d+)',
+        r'\b([A-Z]{2,4}\d{2,4})\b'
+    ]
+    
+    for pattern in emp_number_patterns:
+        emp_match = re.search(pattern, message, re.IGNORECASE)
+        if emp_match:
+            details["employee_number"] = emp_match.group(1).upper()
+            break
+    
+    return details
 
 def search_profiles_by_name_tool(search_name: str, db: Session = None) -> EmployeeToolResult:
     """Tool for searching user profiles by name to find profile_id for employee creation"""
@@ -228,16 +372,45 @@ def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, Any] =
         
         user_id = context['user_id']
         
-        # Check if profile exists - use the profile_id directly instead of User object
-        profile_exists = db.query(User).filter(User.user_id == params.profile_id).first()
+        resolved_profile_id = params.profile_id
+        
+        # If employee_name is provided but no profile_id, search for the profile
+        if params.employee_name and not params.profile_id:
+            profile_search_result = search_profiles_by_name_tool(params.employee_name, db)
+            if not profile_search_result.success or not profile_search_result.data.get('profiles'):
+                return EmployeeToolResult(
+                    success=False,
+                    message=f"❌ No user profile found for '{params.employee_name}'. Please create a user profile first before creating an employee record."
+                )
+            
+            profiles = profile_search_result.data['profiles']
+            if len(profiles) > 1:
+                # Multiple profiles found - ask for clarification
+                profile_names = [f"{p['first_name']} {p['last_name']} ({p['email']})" for p in profiles]
+                return EmployeeToolResult(
+                    success=False,
+                    message=f"❌ Multiple profiles found for '{params.employee_name}': {', '.join(profile_names)}. Please specify which profile to use."
+                )
+            
+            # Use the found profile
+            resolved_profile_id = profiles[0]['profile_id']
+        
+        # Check if profile exists - use the resolved profile_id
+        if not resolved_profile_id:
+            return EmployeeToolResult(
+                success=False,
+                message="❌ Either profile_id or employee_name must be provided."
+            )
+            
+        profile_exists = db.query(User).filter(User.user_id == resolved_profile_id).first()
         if not profile_exists:
             return EmployeeToolResult(
                 success=False,
-                message=f"❌ Profile with ID '{params.profile_id}' not found."
+                message=f"❌ Profile with ID '{resolved_profile_id}' not found."
             )
         
         # Check if employee record already exists for this profile
-        existing_employee = db.query(Employee).filter(Employee.profile_id == params.profile_id).first()
+        existing_employee = db.query(Employee).filter(Employee.profile_id == resolved_profile_id).first()
         if existing_employee:
             return EmployeeToolResult(
                 success=False,
@@ -279,9 +452,19 @@ def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, Any] =
                     message="❌ Invalid termination date format. Please use YYYY-MM-DD format."
                 )
         
-        # Create employee record
+        final_rate = params.rate
+        final_rate_type = params.rate_type
+        
+        # If salary is provided, use it as the rate with salary type
+        if params.salary:
+            final_rate = params.salary
+            final_rate_type = "salary"
+        
+        # Get the employee name for the record
+        employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
+        
         db_employee = Employee(
-            profile_id=params.profile_id,
+            profile_id=resolved_profile_id,
             employee_number=params.employee_number,
             job_title=params.job_title,
             department=params.department,
@@ -290,8 +473,8 @@ def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, Any] =
             committed_hours=params.committed_hours,
             hire_date=hire_date,
             termination_date=termination_date,
-            rate_type=params.rate_type,
-            rate=Decimal(str(params.rate)) if params.rate else None,
+            rate_type=final_rate_type,
+            rate=Decimal(str(final_rate)) if final_rate else None,
             currency=params.currency,
             nda_file_link=params.nda_file_link,
             contract_file_link=params.contract_file_link,
@@ -303,14 +486,18 @@ def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, Any] =
         db.commit()
         db.refresh(db_employee)
         
+        # Get the employee name from the profile for the success message
+        employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
+        
         # Close the database session
         db.close()
         
         return EmployeeToolResult(
             success=True,
-            message=f"✅ Employee record created successfully",
+            message=f"✅ Employee record created successfully for {employee_name} (Employee ID: {db_employee.employee_id})",
             data={
                 "employee_id": db_employee.employee_id,
+                "employee_name": employee_name,
                 "profile_id": str(db_employee.profile_id),
                 "employee_number": db_employee.employee_number,
                 "job_title": db_employee.job_title,
@@ -465,14 +652,13 @@ def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, Any] =
         # Close the database session
         try:
             db.close()
-        except Exception as close_error:
-            print(f"🔧 update_employee_tool: Error closing database session: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=True,
-            message=f"✅ Successfully updated employee ID {params.employee_id}. Updated fields: {', '.join(update_fields)}",
+            message=f"✅ Successfully updated employee. Updated fields: {', '.join(update_fields)}",
             data={
-                "employee_id": employee.employee_id,
                 "updated_fields": update_fields,
                 "employee_number": employee.employee_number,
                 "job_title": employee.job_title,
@@ -485,8 +671,8 @@ def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, Any] =
         try:
             if 'db' in locals() and db is not None:
                 db.close()
-        except Exception as close_error:
-            print(f"🔧 update_employee_tool: Error closing database session on error: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=False,
@@ -518,7 +704,7 @@ def search_employees_tool(search_term: str, limit: int = 50, db: Session = None)
             profile = db.query(User).filter(User.user_id == emp.profile_id).first()
             employee_list.append({
                 "employee_id": emp.employee_id,
-                "profile_id": str(emp.profile_id),  # Add profile_id to results
+                "profile_id": str(emp.profile_id),  # Keep for internal operations
                 "employee_number": emp.employee_number,
                 "job_title": emp.job_title,
                 "department": emp.department,
@@ -545,8 +731,8 @@ def search_employees_tool(search_term: str, limit: int = 50, db: Session = None)
         # Close the database session
         try:
             db.close()
-        except Exception as close_error:
-            print(f"🔧 search_employees_tool: Error closing database session: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=True,
@@ -563,8 +749,8 @@ def search_employees_tool(search_term: str, limit: int = 50, db: Session = None)
         try:
             if 'db' in locals() and db is not None:
                 db.close()
-        except Exception as close_error:
-            print(f"🔧 search_employees_tool: Error closing database session on error: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=False,
@@ -583,8 +769,8 @@ def get_employee_details_tool(employee_id: int, db: Session = None) -> EmployeeT
             # Close the database session
             try:
                 db.close()
-            except Exception as close_error:
-                print(f"🔧 get_employee_details_tool: Error closing database session: {close_error}")
+            except Exception:
+                pass
             
             return EmployeeToolResult(
                 success=False,
@@ -597,8 +783,8 @@ def get_employee_details_tool(employee_id: int, db: Session = None) -> EmployeeT
         # Close the database session
         try:
             db.close()
-        except Exception as close_error:
-            print(f"🔧 get_employee_details_tool: Error closing database session: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=True,
@@ -639,8 +825,8 @@ def get_employee_details_tool(employee_id: int, db: Session = None) -> EmployeeT
         try:
             if 'db' in locals() and db is not None:
                 db.close()
-        except Exception as close_error:
-            print(f"🔧 get_employee_details_tool: Error closing database session on error: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=False,
@@ -664,7 +850,7 @@ def get_all_employees_tool(db: Session = None) -> EmployeeToolResult:
             
             employee_list.append({
                 "employee_id": emp.employee_id,
-                "profile_id": str(emp.profile_id),  # Add profile_id to results
+                "profile_id": str(emp.profile_id),  # Keep for internal operations
                 "employee_number": emp.employee_number,
                 "job_title": emp.job_title,
                 "department": emp.department,
@@ -691,8 +877,8 @@ def get_all_employees_tool(db: Session = None) -> EmployeeToolResult:
         # Close the database session
         try:
             db.close()
-        except Exception as close_error:
-            print(f"🔧 get_all_employees_tool: Error closing database session: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=True,
@@ -708,8 +894,8 @@ def get_all_employees_tool(db: Session = None) -> EmployeeToolResult:
         try:
             if 'db' in locals() and db is not None:
                 db.close()
-        except Exception as close_error:
-            print(f"🔧 get_all_employees_tool: Error closing database session on error: {close_error}")
+        except Exception:
+            pass
         
         return EmployeeToolResult(
             success=False,

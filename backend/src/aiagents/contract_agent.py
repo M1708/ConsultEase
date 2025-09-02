@@ -215,5 +215,19 @@ class ContractAgent:
                         "required": []
                     }
                 }
+            },
+            # 🔧 NEW TOOL: Added for filtering contracts by next month billing dates
+            # TODO: If this change doesn't fix the issue, remove this tool definition
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_contracts_for_next_month_billing",
+                    "description": "Get contracts with billing prompt dates in the next month or later in the current month. Use this when user asks for 'contracts with billing dates next month', 'contracts due for billing next month', or similar requests.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
             }
         ]

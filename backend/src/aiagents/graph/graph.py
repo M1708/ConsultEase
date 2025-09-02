@@ -114,7 +114,8 @@ def after_tool_execution(state: AgentState) -> str:
         if len(unique_calls) == 1:  # Same call repeated
             return END
     
-    # Otherwise, continue with the current agent
+    # CRITICAL FIX: After tool execution, always return to the current agent
+    # so it can process and format the tool results
     return state["current_agent"]
 
 # After any agent runs, we check if we need to run tools

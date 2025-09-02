@@ -7,6 +7,10 @@ from datetime import datetime
 from .state import AgentState, update_state_for_handoff
 from ..memory.context_manager import ContextManager
 
+# ENHANCEMENT: Import enhanced routing logic for better agent classification
+# REVERT: Remove this import if enhanced routing causes issues
+from .enhanced_routing_logic import EnhancedRoutingLogic
+
 
 class IntelligentRouter:
     """Enhanced router using OpenAI function calling for intelligent agent selection"""
@@ -21,6 +25,10 @@ class IntelligentRouter:
             print("Warning: OpenAI API key not found. Router will use fallback mode.")
         self.model = model
         self.context_manager = ContextManager()
+        
+        # ENHANCEMENT: Initialize enhanced routing logic for better fallback routing
+        # REVERT: Remove this line if enhanced routing causes issues
+        self.enhanced_router = EnhancedRoutingLogic()
     
     def get_routing_functions(self) -> List[Dict]:
         """Define function schemas for OpenAI function calling"""
@@ -164,93 +172,64 @@ If the request is a simple greeting, use handle_greeting.
             return self.fallback_routing(user_message)
     
     def fallback_routing(self, user_message: str) -> Dict:
-        """Fallback keyword-based routing when LLM fails"""
-        message_lower = user_message.lower()
-        
-        # Enhanced keyword matching with better logic
-        # Check for update operations first (most specific)
-        if any(word in message_lower for word in ["update", "modify", "change", "edit", "set"]):
-            # Determine what entity is being updated
-            if any(word in message_lower for word in ["client", "company", "customer", "contact", "person"]) and not any(word in message_lower for word in ["contract", "agreement"]):
+        """
+        ENHANCEMENT: Enhanced fallback routing using context-aware classification
+        REVERT: Replace this method with the original keyword-based routing if issues occur
+        """
+        try:
+            # Use enhanced routing logic for better classification
+            result = self.enhanced_router.classify_request(user_message)
+            
+            # Convert enhanced routing result to expected format
+            if result["agent_name"] == "greeting":
                 return {
-                    "function": "route_to_agent",
+                    "function": "handle_greeting",
                     "arguments": {
-                        "agent_name": "client_agent",
-                        "reasoning": "Client update operation detected",
-                        "confidence": "high"
-                    }
-                }
-            elif any(word in message_lower for word in ["contract", "agreement", "billing", "prompt", "date"]):
-                return {
-                    "function": "route_to_agent",
-                    "arguments": {
-                        "agent_name": "contract_agent",
-                        "reasoning": "Contract update operation detected",
-                        "confidence": "high"
+                        "response_type": "greeting"
                     }
                 }
             else:
-                # Check if it mentions a client name with update - likely contract update
-                if any(client_name in message_lower for client_name in ["acme", "techcorp", "global retail"]):
-                    return {
-                        "function": "route_to_agent",
-                        "arguments": {
-                            "agent_name": "contract_agent",
-                            "reasoning": "Update operation with client name detected - likely contract update",
-                            "confidence": "high"
-                        }
-                    }
-                # Default to client agent for general updates
                 return {
                     "function": "route_to_agent",
                     "arguments": {
-                        "agent_name": "client_agent",
-                        "reasoning": "Update operation detected, defaulting to client agent",
-                        "confidence": "medium"
+                        "agent_name": result["agent_name"],
+                        "reasoning": result["reasoning"],
+                        "confidence": result["confidence"]
                     }
                 }
+                
+        except Exception as e:
+            print(f"Error in enhanced routing, falling back to simple routing: {e}")
+            # FALLBACK: Original simple routing logic if enhanced routing fails
+            return self._simple_fallback_routing(user_message)
+    
+    def _simple_fallback_routing(self, user_message: str) -> Dict:
+        """
+        Simple fallback routing - original logic preserved for safety
+        REVERT: Use this as the main fallback_routing method if enhanced routing causes issues
+        """
+        message_lower = user_message.lower()
         
-        # Check for contract-specific requests
-        elif any(phrase in message_lower for phrase in [
-            "all contracts", "show contracts", "list contracts", "contract details",
-            "contracts for", "client contracts", "contract information"
-        ]):
-            return {
-                "function": "route_to_agent", 
-                "arguments": {
-                    "agent_name": "contract_agent",
-                    "reasoning": "Contract-specific request detected",
-                    "confidence": "high"
-                }
-            }
-        
-        # Check for client with contracts requests
-        elif any(phrase in message_lower for phrase in [
-            "clients with contracts", "clients and contracts", "all clients with their contracts",
-            "show me all clients with their contracts", "clients with their contracts"
-        ]):
+        # Basic keyword matching
+        if any(word in message_lower for word in ["employee", "staff", "hire", "employee_number"]):
             return {
                 "function": "route_to_agent",
                 "arguments": {
-                    "agent_name": "contract_agent",
-                    "reasoning": "Client with contracts request - contract agent has the comprehensive tool",
-                    "confidence": "high"
+                    "agent_name": "employee_agent", 
+                    "reasoning": "Employee-related request detected",
+                    "confidence": "medium"
                 }
             }
-        
-        # Check for general client requests (including contact person updates)
-        elif any(word in message_lower for word in ["client", "company", "customer", "contact person", "contact"]) and not any(word in message_lower for word in ["contract"]):
+        elif any(word in message_lower for word in ["client", "company", "customer"]):
             return {
                 "function": "route_to_agent",
                 "arguments": {
                     "agent_name": "client_agent",
                     "reasoning": "Client-related request detected",
-                    "confidence": "high"
+                    "confidence": "medium"
                 }
             }
-        
-        # Check for contract requests
-        elif any(word in message_lower for word in ["contract", "agreement"]):
+        elif any(word in message_lower for word in ["contract", "agreement", "billing"]):
             return {
                 "function": "route_to_agent", 
                 "arguments": {
@@ -259,43 +238,7 @@ If the request is a simple greeting, use handle_greeting.
                     "confidence": "medium"
                 }
             }
-        elif any(word in message_lower for word in ["employee", "staff", "hire"]):
-            return {
-                "function": "route_to_agent",
-                "arguments": {
-                    "agent_name": "employee_agent", 
-                    "reasoning": "Keyword match for employee-related request",
-                    "confidence": "medium"
-                }
-            }
-        elif any(word in message_lower for word in ["deliverable", "project", "milestone"]):
-            return {
-                "function": "route_to_agent",
-                "arguments": {
-                    "agent_name": "deliverable_agent",
-                    "reasoning": "Keyword match for deliverable-related request",
-                    "confidence": "medium"
-                }
-            }
-        elif any(word in message_lower for word in ["time", "hours", "timesheet"]):
-            return {
-                "function": "route_to_agent",
-                "arguments": {
-                    "agent_name": "time_agent",
-                    "reasoning": "Keyword match for time-related request", 
-                    "confidence": "medium"
-                }
-            }
-        elif any(word in message_lower for word in ["user", "account", "profile"]):
-            return {
-                "function": "route_to_agent",
-                "arguments": {
-                    "agent_name": "user_agent",
-                    "reasoning": "Keyword match for user-related request",
-                    "confidence": "medium"
-                }
-            }
-        elif any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good afternoon"]):
+        elif any(word in message_lower for word in ["hello", "hi", "hey"]):
             return {
                 "function": "handle_greeting",
                 "arguments": {

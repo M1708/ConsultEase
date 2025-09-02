@@ -5,7 +5,7 @@ import { chatApi } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 
 interface ChatStore extends ChatState {
-  sendMessage: (message: string) => Promise<void>;
+  sendMessage: (message: string, displayMessage?: string) => Promise<void>;
   clearMessages: () => void;
   setTyping: (typing: boolean) => void;
   addMessage: (message: ChatMessage) => void;
@@ -55,7 +55,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   error: null,
   sessionId: `session_${Date.now()}`,
 
-  sendMessage: async (messageText: string) => {
+  sendMessage: async (messageText: string, displayMessage?: string) => {
     const { user } = useAuthStore.getState();
     const state = get();
 
@@ -70,7 +70,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       // Add user message to chat
       const userMessage: ChatMessage = {
         id: `user_${Date.now()}`,
-        message: messageText,
+        message: displayMessage || messageText,
         response: "",
         agent: "User",
         success: true,

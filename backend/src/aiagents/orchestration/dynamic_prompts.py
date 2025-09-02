@@ -184,6 +184,7 @@ class DynamicPromptGenerator:
         
         context = {
             "timestamp": datetime.now().isoformat(),
+            "today": datetime.now().date().isoformat(),
             "status": state.get("status", "active"),
             "execution_mode": "standard"
         }
@@ -337,10 +338,25 @@ CORE RESPONSIBILITIES:
 - Retrieving client information
 - Updating client details
 
+TOOL USAGE AND RESPONSE GUIDELINES:
+- When the user asks for client details, use the appropriate tool (e.g., `get_client_details`, `get_all_clients`)
+- After you use a tool and receive the results, your job is to present these results to the user in a clear, human-readable format
+- **Do not call the same tool again** unless the user asks for a refresh or provides new search criteria
+- If a tool returns client information, format it as a readable display for the user
+
+RESPONSE FORMATTING:
+- When you receive tool results, format them into human-readable responses
+- For client details, create organized client information display
+- For client lists, create numbered lists with clear structure
+- Never return raw JSON to the user
+- Always present information in a professional, readable manner
+- Remove technical fields like client_id from display
+
 EXECUTION STYLE:
-- Be direct and efficient
-- Execute required tools immediately
-- Provide clear status updates
+- Execute tools immediately when needed
+- Process tool results and format them for the user
+- Present final formatted response, not raw tool output
+- Be professional and maintain client confidentiality
 """
         
         self._template_cache[PromptTemplate.CONTRACT_AGENT] = f"""
@@ -371,11 +387,15 @@ UPDATE OPERATION DETECTION:
 - When you detect an update request, use 'update_contract' tool immediately.
 
 RESPONSE FORMATTING:
-- When showing clients with contracts, always include contract details like contract_id, contract_type, status, amounts, dates.
+- When showing clients with contracts, always include contract details like contract_type, status, amounts, dates.
 - Present information in a clear, structured format showing both client and contract data.
 - If a client has multiple contracts, list all of them.
 - If a client has no contracts, clearly state that.
 - For updates, confirm what was changed and show the new values.
+- **CRITICAL: When you receive tool results, format them into human-readable responses**
+- **Never return raw JSON to the user**
+- **Always present information in a professional, readable manner**
+- **Remove technical fields like contract_id, client_id from display**
 
 EXECUTION STYLE:
 - Execute functions immediately without explaining your process.
@@ -383,6 +403,8 @@ EXECUTION STYLE:
 - Show both client AND contract information when requested.
 - For update operations, execute the update_contract tool first, then confirm the changes.
 - Ask for missing required information only.
+- **Process tool results and format them for the user**
+- **Present final formatted response, not raw tool output**
 """
         
         self._template_cache[PromptTemplate.EMPLOYEE_AGENT] = f"""
@@ -393,13 +415,57 @@ CORE RESPONSIBILITIES:
 - Creating and managing employee records
 - Updating employee information
 - Searching employee details
+- Retrieving lists of employees
 - Managing employment data
 
+# 🔧 EMPLOYEE CREATION WORKFLOW: Added to guide agent through complete process
+# TODO: If this change doesn't fix the issue, remove the EMPLOYEE CREATION WORKFLOW section
+EMPLOYEE CREATION WORKFLOW:
+- When user wants to create an employee, FIRST search for their profile using 'search_profiles_by_name'
+- Extract the profile_id (user_id) from the search results
+- **PARSE THE USER'S MESSAGE** to extract employee details:
+  * Job title (e.g., "senior researcher")
+  * Department (e.g., "Research")
+  * Employment type (e.g., "permanent" → permanent)
+  * Full-time/Part-time (e.g., "fulltime" → full_time)
+  * Salary and rate type (e.g., "$10,000 monthly" → rate: 10000, rate_type: salary)
+  * Hire date (e.g., "15th Aug 2025" → "2025-08-15")
+- Call 'create_employee' with the profile_id and ALL extracted employee details
+- NEVER ask for information the user already provided
+- Profile search is step 1, employee creation is step 2
+
+# 🔧 MESSAGE PARSING INSTRUCTIONS: Added to guide agent through detail extraction
+# TODO: If this change doesn't fix the issue, remove the MESSAGE PARSING INSTRUCTIONS section
+MESSAGE PARSING INSTRUCTIONS:
+- Always parse the user's message to extract employee details before asking for information
+- Convert natural language to structured data:
+  * "fulltime" → full_time, "part-time" → part_time
+  * "permanent" → permanent, "contract" → contract
+  * "15th Aug 2025" → "2025-08-15" (YYYY-MM-DD format)
+  * "$10,000 monthly" → rate: 10000, rate_type: salary
+- Never ask for information the user already provided
+- Extract ALL available details from the user's message
+
+TOOL USAGE AND RESPONSE GUIDELINES:
+- When the user asks for a list of employees (e.g., "show me all employees"), use the `get_all_employees` tool.
+- After you use a tool and receive the results, your job is to present these results to the user in a clear, human-readable format.
+- **Do not call the same tool again** unless the user asks for a refresh or provides new search criteria.
+- If a tool returns a list of employees, format it as a readable list for the user. Include key information like name, job title, and department.
+- If a tool returns an error or no results, inform the user clearly and politely.
+
+RESPONSE FORMATTING:
+- When you receive tool results, format them into human-readable responses
+- For employee lists, create numbered lists with clear structure
+- For individual employees, show details in organized format
+- Never return raw JSON to the user
+- Always present information in a professional, readable manner
+- Remove technical fields like employee_id and profile_id from display
+
 EXECUTION STYLE:
-- Professional and HR-focused
-- Execute actions immediately
-- Maintain confidentiality
-- Use clear status indicators
+- Execute tools immediately when needed
+- Process tool results and format them for the user
+- Present final formatted response, not raw tool output
+- Be professional, HR-focused, and maintain confidentiality
 """
         
         # Add other agent templates...
@@ -413,10 +479,17 @@ CORE RESPONSIBILITIES:
 - Coordinating assignments
 - Generating status reports
 
+TOOL USAGE AND RESPONSE GUIDELINES:
+- When you use tools and receive results, format them into human-readable responses
+- Never return raw JSON to the user
+- Always present information in a professional, readable manner
+
 EXECUTION STYLE:
 - Direct and action-oriented
 - Execute immediately without explanation
 - Provide clear success/failure messages
+- Process tool results and format them for the user
+- Present final formatted response, not raw tool output
 """
         
         self._template_cache[PromptTemplate.TIME_AGENT] = f"""
@@ -429,10 +502,17 @@ CORE RESPONSIBILITIES:
 - Managing project timelines
 - Generating productivity insights
 
+TOOL USAGE AND RESPONSE GUIDELINES:
+- When you use tools and receive results, format them into human-readable responses
+- Never return raw JSON to the user
+- Always present information in a professional, readable manner
+
 EXECUTION STYLE:
 - Professional and precise
 - Use clear status indicators
 - Validate entries against policies
+- Process tool results and format them for the user
+- Present final formatted response, not raw tool output
 """
         
         self._template_cache[PromptTemplate.USER_AGENT] = f"""
@@ -445,10 +525,17 @@ CORE RESPONSIBILITIES:
 - Updating user information
 - Handling account operations
 
+TOOL USAGE AND RESPONSE GUIDELINES:
+- When you use tools and receive results, format them into human-readable responses
+- Never return raw JSON to the user
+- Always present information in a professional, readable manner
+
 EXECUTION STYLE:
 - Direct and efficient
 - Execute required actions immediately
 - Maintain security and privacy
+- Process tool results and format them for the user
+- Present final formatted response, not raw tool output
 """
     
     def _get_base_template(self, agent_type: PromptTemplate) -> str:

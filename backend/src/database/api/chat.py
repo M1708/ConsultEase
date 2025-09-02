@@ -6,6 +6,7 @@ from src.database.core.database import get_db
 from datetime import datetime
 from src.auth.dependencies import get_current_user, AuthenticatedUser
 import json
+from fastapi.security import HTTPAuthorizationCredentials
 
 # --- New Imports for LangGraph Integration ---
 from src.aiagents.graph.graph import app as agent_app
@@ -72,8 +73,6 @@ async def fast_greeting(request: Request):
         body = await request.json()
         message_content = body.get("message", "")
         
-        print(f"⚡ FAST GREETING ENDPOINT: Processing message '{message_content}'")
-        
         # Try to get user name for personalization (optional, don't fail if not available)
         greeting_response = "Hello! How can I help you today?"
         session_id = "fast-greeting"
@@ -82,9 +81,6 @@ async def fast_greeting(request: Request):
             # Optional: Try to get user info if auth token is provided
             auth_header = request.headers.get("authorization")
             if auth_header and auth_header.startswith("Bearer "):
-                from src.auth.dependencies import get_current_user
-                from src.database.core.database import get_db
-                from fastapi.security import HTTPAuthorizationCredentials
                 
                 token = auth_header.split(" ")[1]
                 credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
@@ -157,12 +153,7 @@ async def fast_clients(request: Request):
         body = await request.json()
         message_content = body.get("message", "")
         
-        print(f"⚡ FAST CLIENTS: Processing message '{message_content}'")
-        
         # Get dependencies for client data access
-        from src.database.core.database import get_db
-        from src.auth.dependencies import get_current_user
-        from fastapi.security import HTTPAuthorizationCredentials
         
         db_gen = get_db()
         db = next(db_gen)
@@ -270,6 +261,7 @@ async def send_chat_message(request: Request):
     """
     Sends a message to the new agentic graph and returns a JSON response.
     """
+    db = next(get_db())
     try:
         body = await request.json()
         message_content = body.get("message")
@@ -277,17 +269,17 @@ async def send_chat_message(request: Request):
             raise HTTPException(status_code=400, detail="Message content is required.")
 
         # ULTRA-FAST greeting detection BEFORE any dependencies
-        print(f"🔥 CHAT API: Processing message: '{message_content}'")
         message_lower = message_content.lower().strip()
-        print(f"message_lower: {message_lower}")
         
         # Simple and explicit greeting detection
         simple_greetings = ["hi", "hello", "hey", "hola", "howdy", "greetings"]
         greeting_phrases = ["good morning", "good afternoon", "good evening", "good night"]
         
         is_greeting = (
-            any(message_lower.startswith(g) for g in simple_greetings) or
-            any(phrase in message_lower for phrase in greeting_phrases)
+            message_lower in simple_greetings or
+            any(message_lower.startswith(g + ' ') for g in simple_greetings) or
+            any(phrase in message_lower for phrase in greeting_phrases) or
+            "my name is" in message_lower
         )
         
         if is_greeting:
@@ -295,17 +287,11 @@ async def send_chat_message(request: Request):
             # Try to get personalized greeting with auth
             try:
                 print("Inside try block of ultra-fast greeting")
-                from src.database.core.database import get_db
-                from src.auth.dependencies import get_current_user
-                from fastapi.security import HTTPAuthorizationCredentials
                 
                 auth_header = request.headers.get("authorization")
                 if auth_header and auth_header.startswith("Bearer "):
                     token = auth_header.split(" ")[1]
                     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-                    
-                    db_gen = get_db()
-                    db = next(db_gen)
                     
                     current_user = await get_current_user(credentials, db)
                     
@@ -313,7 +299,12 @@ async def send_chat_message(request: Request):
                     first_name = ''
                     if "my name is" in message_lower:
                         try:
-                            first_name = message_lower.split("my name is")[1].strip()
+                            # Find the start of the name in the original message
+                            # by finding "my name is" case-insensitively
+                            match_pos = message_content.lower().find("my name is")
+                            if match_pos != -1:
+                                name_start_pos = match_pos + len("my name is")
+                                first_name = message_content[name_start_pos:].strip()
                         except:
                             pass
                     if not first_name:
@@ -372,9 +363,6 @@ async def send_chat_message(request: Request):
         is_complex_client_query = any(query in message_lower for query in complex_client_queries)
         is_simple_client_list = any(query in message_lower for query in client_queries) and not is_complex_client_query
         
-        print(f"🔍 CHAT API: Complex query check - is_complex: {is_complex_client_query}, is_simple: {is_simple_client_list}")
-        print(f"🔍 CHAT API: Message: '{message_lower}'")
-        
         if is_simple_client_list:
             print(f"🔥 CHAT API: ULTRA-FAST CLIENT LIST PATH!")
             # Redirect to fast clients endpoint
@@ -382,14 +370,6 @@ async def send_chat_message(request: Request):
         
         # For non-fast-path messages, get dependencies and proceed normally
         print(f"🔥 CHAT API: Getting dependencies for complex query...")
-        
-        # Get dependencies manually for complex messages
-        from src.database.core.database import get_db
-        from src.auth.dependencies import get_current_user
-        from fastapi.security import HTTPAuthorizationCredentials
-        
-        db_gen = get_db()
-        db = next(db_gen)
         
         try:
             # Extract token from Authorization header
@@ -458,7 +438,6 @@ async def send_chat_message(request: Request):
             print(f"🔄 CHAT API: Created new conversation state")
 
         # 2. Invoke the graph and get the result
-        print(f"🚀 Processing message: {message_content}")
         result = await agent_app.ainvoke(initial_state, config={"recursion_limit": 10})
         
         # 3. Extract the response from the result
@@ -519,7 +498,8 @@ async def send_chat_message(request: Request):
             session_id="error-session",
             data={"error": str(e)}
         )
-    
+    finally:
+        db.close()
 
 @router.post("/message/stream")
 async def send_chat_message_stream(
@@ -552,7 +532,7 @@ async def send_chat_message_stream(
         # Define the streaming response generator
         async def stream_generator():
             async for event in agent_app.astream(initial_state, config={"recursion_limit": 10}):
-                yield f"data: {json.dumps(event)}\n\n"
+                yield f"data: {json.dumps(event)}"
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 

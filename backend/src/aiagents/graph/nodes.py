@@ -35,6 +35,8 @@ class EnhancedAgentNodeExecutor:
     - Sub-100ms response optimization
     """
     
+
+    
     def __init__(self, model: str = "gpt-4o-mini"):
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
@@ -534,6 +536,28 @@ class EnhancedAgentNodeExecutor:
                 selected_tool = "get_all_contracts"
                 print(f"🔧 Fallback: Detected all contracts retrieval")
         
+        # Employee creation and update detection
+        elif any(word in user_message_lower for word in ["create", "add", "hire", "onboard"]):
+            if any(word in user_message_lower for word in ["employee", "staff"]):
+                # 🔧 ENHANCEMENT: Enhanced employee information extraction
+                # TODO: If this change doesn't fix the issue, revert this enhancement
+                employee_info = self._extract_employee_creation_info(user_message)
+                if employee_info.get('employee_name') or employee_info.get('profile_name'):
+                    selected_tool = "create_employee"
+                    tool_args = {
+                        "employee_name": employee_info.get('employee_name'),
+                        "profile_id": employee_info.get('profile_id', ''),
+                        "job_title": employee_info.get('job_title', ''),
+                        "department": employee_info.get('department', ''),
+                        "employment_type": employee_info.get('employment_type', 'permanent'),
+                        "full_time_part_time": employee_info.get('full_time_part_time', 'full_time'),
+                        "salary": employee_info.get('salary'),
+                        "hire_date": employee_info.get('hire_date')
+                    }
+                    # Remove None values to avoid issues
+                    tool_args = {k: v for k, v in tool_args.items() if v is not None}
+                    print(f"🔧 Fallback: Detected employee creation for {employee_info.get('employee_name') or employee_info.get('profile_name')}")
+        
         # Client retrieval detection
         elif any(word in user_message_lower for word in ["client", "clients"]):
             if "all clients" in user_message_lower:
@@ -545,6 +569,23 @@ class EnhancedAgentNodeExecutor:
                     selected_tool = "get_client_details"
                     tool_args = {"client_name": client_name}
                     print(f"🔧 Fallback: Detected client details for {client_name}")
+        
+        # Employee retrieval detection
+        elif any(word in user_message_lower for word in ["employee", "employees", "staff"]):
+            if "all employees" in user_message_lower or "show me all employees" in user_message_lower:
+                selected_tool = "get_all_employees"
+                print(f"🔧 Fallback: Detected all employees retrieval")
+            elif any(word in user_message_lower for word in ["search", "find"]):
+                # Extract search term
+                search_term = self._extract_employee_search_term(user_message)
+                if search_term:
+                    selected_tool = "search_employees"
+                    tool_args = {"search_term": search_term}
+                    print(f"🔧 Fallback: Detected employee search for '{search_term}'")
+            else:
+                # Default to getting all employees
+                selected_tool = "get_all_employees"
+                print(f"🔧 Fallback: Detected employee-related request")
         
         # Execute the selected tool
         if selected_tool and selected_tool in TOOL_REGISTRY:
@@ -584,6 +625,173 @@ class EnhancedAgentNodeExecutor:
         })()
         
         return {"messages": [response_message]}
+    
+
+
+
+
+
+    def _extract_employee_search_term(self, message: str) -> str:
+        """Extract employee search term from message"""
+        message_lower = message.lower()
+        
+        # Remove common prefixes
+        prefixes_to_remove = [
+            "search for",
+            "find",
+            "look for",
+            "show me",
+            "get",
+            "retrieve",
+            "employees",
+            "employee",
+            "staff"
+        ]
+        
+        cleaned_message = message
+        for prefix in prefixes_to_remove:
+            if cleaned_message.lower().startswith(prefix.lower()):
+                cleaned_message = cleaned_message[len(prefix):].strip()
+                break
+        
+        # Remove common suffixes
+        suffixes_to_remove = [
+            "in the",
+            "department",
+            "team",
+            "division",
+            "section"
+        ]
+        
+        for suffix in suffixes_to_remove:
+            if cleaned_message.lower().endswith(suffix.lower()):
+                cleaned_message = cleaned_message[:-len(suffix)].strip()
+                break
+        
+        # Clean up extra spaces and punctuation
+        import re
+        cleaned_message = re.sub(r'\s+', ' ', cleaned_message)
+        cleaned_message = cleaned_message.strip('.,;:!?')
+        
+        return cleaned_message if cleaned_message else "all"
+    
+    def _extract_employee_creation_info(self, message: str) -> Dict[str, Any]:
+        """Extract employee creation information from message"""
+        import re
+        
+        employee_info = {
+            'employee_name': None,
+            'profile_name': None,
+            'profile_id': None,
+            'job_title': None,
+            'department': None,
+            'employment_type': 'permanent',
+            'full_time_part_time': 'full_time',
+            'salary': None,
+            'hire_date': None
+        }
+        
+        # 🔧 ENHANCEMENT: Extract employee name from message
+        # TODO: If this change doesn't fix the issue, revert this enhancement
+        name_patterns = [
+            r"(?:his|her|their)?\s*name\s+is\s+([A-Z][a-z]+\s+[A-Z][a-z]+)",
+            r"employee\s+(?:named\s+)?([A-Z][a-z]+\s+[A-Z][a-z]+)",
+            r"for\s+([A-Z][a-z]+\s+[A-Z][a-z]+)(?:\s*,|\s*\.|\s+who|\s+he|\s+she)",
+            r"create.*employee.*([A-Z][a-z]+\s+[A-Z][a-z]+)"
+        ]
+        
+        for pattern in name_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip()
+                if len(name.split()) == 2:  # First and last name
+                    employee_info['employee_name'] = name
+                    employee_info['profile_name'] = name
+                    break
+        
+        # Extract job title patterns - enhanced
+        job_title_patterns = [
+            r"(?:he|she|they)\s+is\s+(?:a\s+)?([A-Za-z\s]+?)(?:\s*,|\s+in|\s+for|\s*\.|\s*$)",
+            r"as\s+(?:a\s+)?([A-Za-z\s]+?)(?:\s+in|\s+for|\s*\.|\s*,|\s*$)",
+            r"position\s+(?:of\s+)?([A-Za-z\s]+?)(?:\s+in|\s+for|\s*\.|\s*,|\s*$)",
+            r"job\s+(?:title\s+)?([A-Za-z\s]+?)(?:\s+in|\s+for|\s*\.|\s*,|\s*$)",
+            r"(?:senior|junior|lead|principal)\s+([A-Za-z\s]+?)(?:\s*,|\s+in|\s+for|\s*\.|\s*$)"
+        ]
+        
+        for pattern in job_title_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                job_title = match.group(1).strip()
+                if len(job_title) > 2 and job_title.lower() not in ['a', 'an', 'the', 'and', 'or']:
+                    employee_info['job_title'] = job_title.title()
+                    break
+        
+        # Extract department patterns - enhanced
+        department_patterns = [
+            r"works?\s+in\s+(?:the\s+)?([A-Za-z\s]+?)(?:\s+department|\s+team|\s*\.|\s*,|\s+and|\s*$)",
+            r"in\s+(?:the\s+)?([A-Za-z\s]+?)(?:\s+department|\s+team|\s*\.|\s*,|\s*$)",
+            r"department\s+([A-Za-z\s]+?)(?:\s*\.|\s*,|\s*$)",
+            r"team\s+([A-Za-z\s]+?)(?:\s*\.|\s*,|\s*$)"
+        ]
+        
+        for pattern in department_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                department = match.group(1).strip()
+                if len(department) > 2 and department.lower() not in ['a', 'an', 'the', 'and', 'or']:
+                    employee_info['department'] = department.title()
+                    break
+        
+        # Extract employment type
+        if any(word in message.lower() for word in ["permanent"]):
+            employee_info['employment_type'] = 'permanent'
+        elif any(word in message.lower() for word in ["contract", "contractor"]):
+            employee_info['employment_type'] = 'contract'
+        elif any(word in message.lower() for word in ["intern", "internship"]):
+            employee_info['employment_type'] = 'intern'
+        elif any(word in message.lower() for word in ["consultant", "consulting"]):
+            employee_info['employment_type'] = 'consultant'
+        
+        # Extract full/part time
+        if any(word in message.lower() for word in ["fulltime", "full-time", "full time"]):
+            employee_info['full_time_part_time'] = 'full_time'
+        elif any(word in message.lower() for word in ["part-time", "part time", "parttime"]):
+            employee_info['full_time_part_time'] = 'part_time'
+        
+        # 🔧 ENHANCEMENT: Extract salary information
+        # TODO: If this change doesn't fix the issue, revert this enhancement
+        salary_patterns = [
+            r"salary\s+is\s+\$?([\d,]+)",
+            r"monthly\s+salary\s+\$?([\d,]+)",
+            r"\$?([\d,]+)\s*(?:per\s+month|monthly)",
+            r"\$?([\d,]+)"
+        ]
+        
+        for pattern in salary_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                try:
+                    salary = float(match.group(1).replace(',', ''))
+                    employee_info['salary'] = salary
+                    break
+                except ValueError:
+                    continue
+        
+        # 🔧 ENHANCEMENT: Extract hire date
+        # TODO: If this change doesn't fix the issue, revert this enhancement
+        hire_date_patterns = [
+            r"joined\s+(?:us\s+)?on\s+(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})",
+            r"hire\s+date\s+(?:is\s+)?(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})",
+            r"starting\s+(?:on\s+)?(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})"
+        ]
+        
+        for pattern in hire_date_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                employee_info['hire_date'] = match.group(1)
+                break
+        
+        return employee_info
     
     def _extract_client_name(self, message: str) -> str:
         """Extract client name from message"""
@@ -869,8 +1077,211 @@ class EnhancedAgentNodeExecutor:
         elif tool_name == "update_contract":
             return f"✅ Contract updated successfully! {result.get('message', '')}"
         
+        elif tool_name == "get_all_employees":
+            # Format employee list information
+            if isinstance(data, dict) and 'employees' in data:
+                employees = data['employees']
+                count = data.get('count', 0)
+                
+                response = f"📋 **Employee Directory** - Found {count} employee(s) in the system\n\n"
+                
+                for i, emp in enumerate(employees, 1):
+                    profile = emp.get('profile', {})
+                    full_name = profile.get('full_name', 'Unknown')
+                    job_title = emp.get('job_title', 'N/A')
+                    department = emp.get('department', 'N/A')
+                    employment_type = emp.get('employment_type', 'N/A')
+                    hire_date = emp.get('hire_date', 'N/A')
+                    
+                    response += f"### {i}. {full_name}\n"
+                    response += f"- **Job Title:** {job_title}\n"
+                    response += f"- **Department:** {department}\n"
+                    response += f"- **Employment Type:** {employment_type}\n"
+                    response += f"- **Hire Date:** {hire_date}\n"
+                    
+                    # Add rate information if available
+                    if emp.get('rate'):
+                        rate = emp.get('rate')
+                        currency = emp.get('currency', 'USD')
+                        rate_type = emp.get('rate_type', 'N/A')
+                        response += f"- **Rate:** {rate} {currency} ({rate_type})\n"
+                    
+                    response += "\n"
+                
+                response += "If you need more details about a specific employee or want to perform other operations, feel free to ask!"
+                return response
+        
+        elif tool_name == "search_employees":
+            # Format employee search results
+            if isinstance(data, dict) and 'employees' in data:
+                employees = data['employees']
+                count = data.get('count', 0)
+                search_term = data.get('search_term', 'Unknown')
+                
+                response = f"🔍 **Employee Search Results** for '{search_term}' - Found {count} employee(s)\n\n"
+                
+                for i, emp in enumerate(employees, 1):
+                    profile = emp.get('profile', {})
+                    full_name = profile.get('full_name', 'Unknown')
+                    job_title = emp.get('job_title', 'N/A')
+                    department = emp.get('department', 'N/A')
+                    employment_type = emp.get('employment_type', 'N/A')
+                    
+                    response += f"### {i}. {full_name}\n"
+                    response += f"- **Job Title:** {job_title}\n"
+                    response += f"- **Department:** {department}\n"
+                    response += f"- **Employment Type:** {employment_type}\n"
+                    
+                    # Add rate information if available
+                    if emp.get('rate'):
+                        rate = emp.get('rate')
+                        currency = emp.get('currency', 'USD')
+                        rate_type = emp.get('rate_type', 'N/A')
+                        response += f"- **Rate:** {rate} {currency} ({rate_type})\n"
+                    
+                    response += "\n"
+                
+                response += "If you need more details about a specific employee or want to perform other operations, feel free to ask!"
+                return response
+        
+        elif tool_name == "get_employee_details":
+            # Format individual employee details
+            if isinstance(data, dict):
+                profile = data.get('profile', {})
+                full_name = profile.get('full_name', 'Unknown')
+                job_title = data.get('job_title', 'N/A')
+                department = data.get('department', 'N/A')
+                employment_type = data.get('employment_type', 'N/A')
+                hire_date = data.get('hire_date', 'N/A')
+                rate = data.get('rate', 'N/A')
+                currency = data.get('currency', 'USD')
+                rate_type = data.get('rate_type', 'N/A')
+                
+                response = f"👤 **Employee Details** for {full_name}\n\n"
+                response += f"- **Job Title:** {job_title}\n"
+                response += f"- **Department:** {department}\n"
+                response += f"- **Employment Type:** {employment_type}\n"
+                response += f"- **Hire Date:** {hire_date}\n"
+                response += f"- **Rate:** {rate} {currency} ({rate_type})\n"
+                
+                # Add additional details if available
+                if data.get('committed_hours'):
+                    response += f"- **Committed Hours:** {data.get('committed_hours')}\n"
+                if data.get('nda_file_link'):
+                    response += f"- **NDA File:** {data.get('nda_file_link')}\n"
+                if data.get('contract_file_link'):
+                    response += f"- **Contract File:** {data.get('contract_file_link')}\n"
+                
+                response += "\nIf you need to update any information or have other questions, feel free to ask!"
+                return response
+        
+        elif tool_name == "create_employee":
+            # Format employee creation result
+            if isinstance(data, dict):
+                employee_name = data.get('employee_name', 'Unknown')
+                employee_id = data.get('employee_id', 'N/A')
+                job_title = data.get('job_title', 'N/A')
+                department = data.get('department', 'N/A')
+                employment_type = data.get('employment_type', 'N/A')
+                full_time_part_time = data.get('full_time_part_time', 'N/A')
+                hire_date = data.get('hire_date', 'N/A')
+                
+                response = f"✅ **Employee Created Successfully for {employee_name}!**\n\n"
+                response += f"- **Employee ID:** {employee_id}\n"
+                response += f"- **Employee Name:** {employee_name}\n"
+                response += f"- **Job Title:** {job_title}\n"
+                response += f"- **Department:** {department}\n"
+                response += f"- **Employment Type:** {employment_type.title()}\n"
+                response += f"- **Work Schedule:** {full_time_part_time.replace('_', '-').title()}\n"
+                response += f"- **Hire Date:** {hire_date}\n"
+                response += f"- **Status:** Active\n\n"
+                response += "The new employee has been added to the system. You can now assign them to projects or update their information as needed."
+                return response
+        
+        elif tool_name == "update_employee":
+            # Format employee update result
+            if isinstance(data, dict):
+                updated_fields = data.get('updated_fields', [])
+                
+                response = f"✅ **Employee Updated Successfully!**\n\n"
+                response += f"- **Updated Fields:** {', '.join(updated_fields)}\n\n"
+                response += "The employee information has been updated in the system."
+                return response
+        
+        elif tool_name == "get_client_details":
+            # Format individual client details
+            if isinstance(data, dict):
+                response = f"📋 **Client Details** for {data.get('client_name', 'Unknown')}\n\n"
+                response += f"- **Client Name:** {data.get('client_name', 'N/A')}\n"
+                response += f"- **Industry:** {data.get('industry', 'N/A')}\n"
+                response += f"- **Primary Contact Name:** {data.get('primary_contact_name', 'N/A')}\n"
+                response += f"- **Primary Contact Email:** {data.get('primary_contact_email', 'N/A')}\n"
+                response += f"- **Company Size:** {data.get('company_size', 'N/A')}\n"
+                response += f"- **Notes:** {data.get('notes', 'N/A')}\n"
+                response += f"- **Created:** {data.get('created_at', 'N/A')}\n"
+                response += f"- **Last Updated:** {data.get('updated_at', 'N/A')}\n\n"
+                response += "If you need to update any information or have other questions, feel free to ask!"
+                return response
+        
+        elif tool_name == "get_client_contracts":
+            # Format contract list information
+            if isinstance(data, dict) and 'contracts' in data:
+                contracts = data['contracts']
+                client = data.get('client', {})
+                count = len(contracts)
+                
+                response = f"📋 **Contracts for {client.get('client_name', 'Unknown')}** - Found {count} contract(s)\n\n"
+                
+                for i, contract in enumerate(contracts, 1):
+                    response += f"### {i}. Contract #{contract.get('contract_id', 'N/A')}\n"
+                    response += f"- **Type:** {contract.get('contract_type', 'N/A')}\n"
+                    response += f"- **Status:** {contract.get('status', 'N/A')}\n"
+                    response += f"- **Amount:** ${contract.get('original_amount', 0):,.2f}\n"
+                    response += f"- **Next Billing:** {contract.get('billing_prompt_next_date', 'N/A')}\n\n"
+                
+                response += "If you need more details about a specific contract or want to perform other operations, feel free to ask!"
+                return response
+        
+        elif tool_name == "get_all_clients":
+            # Format client list information
+            if isinstance(data, dict) and 'clients' in data:
+                clients = data['clients']
+                count = data.get('count', 0)
+                
+                response = f"📋 **Client Directory** - Found {count} client(s) in the system\n\n"
+                
+                for i, client in enumerate(clients, 1):
+                    response += f"### {i}. {client.get('client_name', 'Unknown')}\n"
+                    response += f"- **Industry:** {client.get('industry', 'N/A')}\n"
+                    response += f"- **Primary Contact:** {client.get('primary_contact_name', 'N/A')}\n"
+                    response += f"- **Contact Email:** {client.get('primary_contact_email', 'N/A')}\n"
+                    response += f"- **Company Size:** {client.get('company_size', 'N/A')}\n\n"
+                
+                response += "If you need more details about a specific client or want to perform other operations, feel free to ask!"
+                return response
+        
+        elif tool_name == "get_all_contracts":
+            # Format all contracts list information
+            if isinstance(data, dict) and 'contracts' in data:
+                contracts = data['contracts']
+                count = data.get('count', 0)
+                
+                response = f"📋 **All Contracts** - Found {count} contract(s) in the system\n\n"
+                
+                for i, contract in enumerate(contracts, 1):
+                    response += f"### {i}. Contract #{contract.get('contract_id', 'N/A')}\n"
+                    response += f"- **Client:** {contract.get('client_name', 'N/A')}\n"
+                    response += f"- **Type:** {contract.get('contract_type', 'N/A')}\n"
+                    response += f"- **Status:** {contract.get('status', 'N/A')}\n"
+                    response += f"- **Amount:** ${contract.get('original_amount', 0):,.2f}\n\n"
+                
+                response += "If you need more details about a specific contract or want to perform other operations, feel free to ask!"
+                return response
+        
         # Default formatting
         return result.get('message', 'Operation completed successfully.')
+    
+
 
 
 # --- Agent Node Definitions ---

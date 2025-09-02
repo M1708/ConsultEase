@@ -42,29 +42,32 @@ async def get_user_profile_by_id(
     db: Session = Depends(get_db)
 ):
     """Get user profile by user ID (for internal use)"""
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        full_name = f"{user.first_name} {user.last_name}" if user.first_name and user.last_name else user.first_name or user.last_name or user.email
+        return UserProfileResponse(
+            user_id=str(user.user_id),
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            full_name=full_name,
+            role=user.role.value,
+            status=user.status.value,
+            phone=user.phone,
+            last_login=user.last_login,
+            two_factor_enabled=user.two_factor_enabled,
+            preferences=user.preferences,
+            created_at=user.created_at,
+            updated_at=user.updated_at
         )
-    
-    full_name = f"{user.first_name} {user.last_name}" if user.first_name and user.last_name else user.first_name or user.last_name or user.email
-    return UserProfileResponse(
-        user_id=str(user.user_id),
-        email=user.email,
-        first_name=user.first_name,
-        last_name=user.last_name,
-        full_name=full_name,
-        role=user.role.value,
-        status=user.status.value,
-        phone=user.phone,
-        last_login=user.last_login,
-        two_factor_enabled=user.two_factor_enabled,
-        preferences=user.preferences,
-        created_at=user.created_at,
-        updated_at=user.updated_at
-    )
+    finally:
+        db.close()
 
 @router.patch("/users/{user_id}/last-login")
 async def update_last_login(
@@ -72,19 +75,22 @@ async def update_last_login(
     db: Session = Depends(get_db)
 ):
     """Update user's last login timestamp"""
-    from datetime import datetime
-    
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    user.last_login = datetime.utcnow()
-    db.commit()
-    
-    return {"message": "Last login updated successfully"}
+    try:
+        from datetime import datetime
+        
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        user.last_login = datetime.utcnow()
+        db.commit()
+        
+        return {"message": "Last login updated successfully"}
+    finally:
+        db.close()
 
 @router.get("/session", response_model=SessionResponse)
 async def get_current_session(current_user: AuthenticatedUser = Depends(get_current_user)):
