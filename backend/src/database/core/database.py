@@ -14,7 +14,20 @@ load_dotenv(env_file_path)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL, pool_recycle=3600)
+# 🚀 PHASE 1 OPTIMIZATION: Enhanced database connection pool for better performance
+# TODO: If connection issues occur, revert to basic engine configuration
+engine = create_engine(
+    DATABASE_URL, 
+    pool_recycle=3600,           # Keep existing recycle time
+    pool_size=10,                # 🚀 OPTIMIZATION: Set minimum pool size to 10 connections
+    max_overflow=20,             # 🚀 OPTIMIZATION: Allow up to 20 additional connections (total 30)
+    pool_pre_ping=True,          # 🚀 OPTIMIZATION: Validate connections before use
+    pool_timeout=30,             # 🚀 OPTIMIZATION: 30s timeout for getting connection from pool
+    connect_args={
+        "connect_timeout": 10,   # 🚀 OPTIMIZATION: 10s timeout for initial connection
+        "application_name": "ConsultEase_Backend"  # 🚀 OPTIMIZATION: Better connection tracking
+    }
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

@@ -135,12 +135,16 @@ If the request is a simple greeting, use handle_greeting.
                 {"role": "user", "content": user_message}
             ]
             
+            # 🚀 PHASE 1 OPTIMIZATION: Reduced timeout and optimized parameters for faster responses
+            # TODO: If performance degrades, revert timeout and max_tokens settings
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=self.get_routing_functions(),
                 tool_choice="auto",
-                temperature=0.1
+                temperature=0.1,     # Keep low for deterministic routing
+                timeout=10.0,        # 🚀 OPTIMIZATION: Added 10s timeout for faster failure detection
+                max_tokens=200       # 🚀 OPTIMIZATION: Reduced to 200 for faster routing decisions
             )
             
             message = response.choices[0].message

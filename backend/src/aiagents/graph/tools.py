@@ -437,6 +437,8 @@ def _search_employees_wrapper(**kwargs) -> Dict[str, Any]:
     result = search_employees_tool(search_term, limit, db)
     return result.model_dump()
 
+
+
 def _get_employee_details_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for getting detailed employee information"""
     db = kwargs.pop('db', None)

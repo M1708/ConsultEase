@@ -681,20 +681,224 @@ def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, Any] =
 
 def search_employees_tool(search_term: str, limit: int = 50, db: Session = None) -> EmployeeToolResult:
     """Tool for searching employees by name, job title, department, or employee number"""
+    
+    
     try:
-        # Always create a fresh database session to avoid session closure issues
-        db = next(get_db())
+        # 🚀 PERFORMANCE OPTIMIZATION: Reuse database session if provided
+        # TODO: If database session issues occur, revert to always creating fresh sessions
+        should_close = False
+        if db is None:
+            db = next(get_db())
+            should_close = True
         
         # Search across multiple fields
         query = db.query(Employee).join(User, Employee.profile_id == User.user_id)
         
-        search_filter = (
-            User.first_name.ilike(f"%{search_term}%") |
-            User.last_name.ilike(f"%{search_term}%") |
-            Employee.job_title.ilike(f"%{search_term}%") |
-            Employee.department.ilike(f"%{search_term}%") |
-            Employee.employee_number.ilike(f"%{search_term}%")
-        )
+        # Handle inconsistent database values for part-time/full-time
+        search_term_variations = [search_term]
+        if search_term.lower() == "part-time":
+            search_term_variations.extend(["part_time", "part time"])
+        elif search_term.lower() == "full-time":
+            search_term_variations.extend(["full_time", "full time"])
+        elif search_term.lower() == "part_time":
+            search_term_variations.extend(["part-time", "part time"])
+        elif search_term.lower() == "full_time":
+            search_term_variations.extend(["full-time", "full time"])
+        
+        # Build search filter with variations
+        # TODO: If employee queries become incomplete, revert this rate_type field addition
+        search_conditions = []
+        
+        # Handle date-based searches
+        if search_term.startswith("start_date:"):
+            # TODO: If employee queries become incomplete, revert this date search addition
+            date_str = search_term.replace("start_date:", "").strip()
+            try:
+                from datetime import datetime
+                # Try to parse various date formats
+                date_formats = [
+                    "%b %d %Y",      # Jan 1 2026
+                    "%B %d %Y",      # January 1 2026
+                    "%b %dst %Y",    # Jan 1st 2026
+                    "%b %dnd %Y",    # Jan 2nd 2026
+                    "%b %drd %Y",    # Jan 3rd 2026
+                    "%b %dth %Y",    # Jan 4th 2026
+                    "%B %dst %Y",    # January 1st 2026
+                    "%B %dnd %Y",    # January 2nd 2026
+                    "%B %drd %Y",    # January 3rd 2026
+                    "%B %dth %Y",    # January 4th 2026
+                    "%Y-%m-%d",      # 2026-01-01
+                    "%m/%d/%Y",      # 01/01/2026
+                    "%d/%m/%Y"       # 01/01/2026
+                ]
+                
+                parsed_date = None
+                for fmt in date_formats:
+                    try:
+                        parsed_date = datetime.strptime(date_str, fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                
+                if parsed_date:
+                    # Search for exact hire date match
+                    search_filter = Employee.hire_date == parsed_date
+                else:
+                    # Fallback to text search if date parsing fails
+                    search_filter = Employee.hire_date.ilike(f"%{date_str}%")
+            except Exception as e:
+                print(f"Date parsing error: {e}")
+                # Fallback to text search
+                search_filter = Employee.hire_date.ilike(f"%{date_str}%")
+        elif search_term.startswith("start_relative:"):
+            # TODO: If employee queries become incomplete, revert this relative date search addition
+            relative_str = search_term.replace("start_relative:", "").strip()
+            try:
+                from datetime import datetime, date, timedelta
+                from dateutil.relativedelta import relativedelta
+                
+                today = date.today()
+                
+                if relative_str == "this month":
+                    # This month: from 1st of current month to end of current month
+                    start_date = today.replace(day=1)
+                    end_date = start_date + relativedelta(months=1) - timedelta(days=1)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif relative_str == "this year":
+                    # This year: from Jan 1st to Dec 31st of current year
+                    start_date = today.replace(month=1, day=1)
+                    end_date = today.replace(month=12, day=31)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif relative_str == "last month":
+                    # Last month: from 1st of last month to end of last month
+                    last_month = today - relativedelta(months=1)
+                    start_date = last_month.replace(day=1)
+                    end_date = start_date + relativedelta(months=1) - timedelta(days=1)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif relative_str == "last year":
+                    # Last year: from Jan 1st to Dec 31st of last year
+                    last_year = today - relativedelta(years=1)
+                    start_date = last_year.replace(month=1, day=1)
+                    end_date = last_year.replace(month=12, day=31)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif relative_str == "next month":
+                    # Next month: from 1st of next month to end of next month
+                    next_month = today + relativedelta(months=1)
+                    start_date = next_month.replace(day=1)
+                    end_date = start_date + relativedelta(months=1) - timedelta(days=1)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif relative_str == "next year":
+                    # Next year: from Jan 1st to Dec 31st of next year
+                    next_year = today + relativedelta(years=1)
+                    start_date = next_year.replace(month=1, day=1)
+                    end_date = next_year.replace(month=12, day=31)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif "next year" in relative_str and ("feb" in relative_str.lower() or "february" in relative_str.lower()):
+                    # Next year in February: Feb 1st to Feb 28/29 of next year
+                    next_year = today + relativedelta(years=1)
+                    start_date = next_year.replace(month=2, day=1)
+                    # February can have 28 or 29 days depending on leap year
+                    if next_year.year % 4 == 0 and (next_year.year % 100 != 0 or next_year.year % 400 == 0):
+                        end_date = next_year.replace(month=2, day=29)  # Leap year
+                    else:
+                        end_date = next_year.replace(month=2, day=28)  # Regular year
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif "next year" in relative_str and ("jan" in relative_str.lower() or "january" in relative_str.lower()):
+                    # Next year in January: Jan 1st to Jan 31st of next year
+                    next_year = today + relativedelta(years=1)
+                    start_date = next_year.replace(month=1, day=1)
+                    end_date = next_year.replace(month=1, day=31)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif "next year" in relative_str and ("mar" in relative_str.lower() or "march" in relative_str.lower()):
+                    # Next year in March: Mar 1st to Mar 31st of next year
+                    next_year = today + relativedelta(years=1)
+                    start_date = next_year.replace(month=3, day=1)
+                    end_date = next_year.replace(month=3, day=31)
+                    search_filter = Employee.hire_date.between(start_date, end_date)
+                    
+                elif "last" in relative_str and "months" in relative_str:
+                    # Extract number of months (e.g., "last 2 months")
+                    import re
+                    months_match = re.search(r'(\d+)', relative_str)
+                    if months_match:
+                        months_count = int(months_match.group(1))
+                        # From N months ago to end of last month
+                        start_date = (today - relativedelta(months=months_count)).replace(day=1)
+                        end_date = (today - relativedelta(months=1)).replace(day=1) + relativedelta(months=1) - timedelta(days=1)
+                        search_filter = Employee.hire_date.between(start_date, end_date)
+                    else:
+                        # Fallback to last month only
+                        last_month = today - relativedelta(months=1)
+                        start_date = last_month.replace(day=1)
+                        end_date = start_date + relativedelta(months=1) - timedelta(days=1)
+                        search_filter = Employee.hire_date.between(start_date, end_date)
+                        
+                elif "last" in relative_str and "years" in relative_str:
+                    # Extract number of years (e.g., "last 2 years")
+                    import re
+                    years_match = re.search(r'(\d+)', relative_str)
+                    if years_match:
+                        years_count = int(years_match.group(1))
+                        # From N years ago to end of last year
+                        start_date = (today - relativedelta(years=years_count)).replace(month=1, day=1)
+                        end_date = (today - relativedelta(years=1)).replace(month=12, day=31)
+                        search_filter = Employee.hire_date.between(start_date, end_date)
+                    else:
+                        # Fallback to last year only
+                        last_year = today - relativedelta(years=1)
+                        start_date = last_year.replace(month=1, day=1)
+                        end_date = last_year.replace(month=12, day=31)
+                        search_filter = Employee.hire_date.between(start_date, end_date)
+                        
+                elif "next" in relative_str and "months" in relative_str:
+                    # Extract number of months (e.g., "in next 2 months")
+                    import re
+                    months_match = re.search(r'(\d+)', relative_str)
+                    if months_match:
+                        months_count = int(months_match.group(1))
+                        # From next month to N months from now
+                        start_date = (today + relativedelta(months=1)).replace(day=1)
+                        end_date = today + relativedelta(months=months_count)
+                        search_filter = Employee.hire_date.between(start_date, end_date)
+                    else:
+                        # Fallback to next month only
+                        next_month = today + relativedelta(months=1)
+                        start_date = next_month.replace(day=1)
+                        end_date = start_date + relativedelta(months=1) - timedelta(days=1)
+                        search_filter = Employee.hire_date.between(start_date, end_date)
+                else:
+                    # Fallback to text search
+                    search_filter = Employee.hire_date.ilike(f"%{relative_str}%")
+                    
+            except Exception as e:
+                print(f"Relative date parsing error: {e}")
+                # Fallback to text search
+                search_filter = Employee.hire_date.ilike(f"%{relative_str}%")
+        else:
+            # Regular text-based search
+            for term in search_term_variations:
+                search_conditions.extend([
+                    User.first_name.ilike(f"%{term}%"),
+                    User.last_name.ilike(f"%{term}%"),
+                    Employee.job_title.ilike(f"%{term}%"),
+                    Employee.department.ilike(f"%{term}%"),
+                    Employee.employee_number.ilike(f"%{term}%"),
+                    Employee.employment_type.ilike(f"%{term}%"),
+                    Employee.full_time_part_time.ilike(f"%{term}%"),
+                    Employee.rate_type.ilike(f"%{term}%")  # 🚀 FIX: Add rate_type search for hourly/salary queries
+                ])
+            
+            search_filter = search_conditions[0]
+            for condition in search_conditions[1:]:
+                search_filter = search_filter | condition
         
         employees = query.filter(search_filter).limit(limit).all()
         
@@ -728,15 +932,17 @@ def search_employees_tool(search_term: str, limit: int = 50, db: Session = None)
                 }
             })
         
-        # Close the database session
-        try:
-            db.close()
-        except Exception:
-            pass
+        # 🚀 PERFORMANCE OPTIMIZATION: Only close session if we created it
+        # TODO: If database session issues occur, revert to always closing sessions
+        if should_close:
+            try:
+                db.close()
+            except Exception:
+                pass
         
         return EmployeeToolResult(
             success=True,
-            message=f"📋 Found {len(employee_list)} employees matching '{search_term}'",
+            message=f"📋 Found {len(employee_list)} employees matching '{search_term}'. Please format this data to include ALL fields: Employee Number, Job Title, Department, Employment Type, Work Schedule, Hire Date, Rate, and Email address from the profile data.",
             data={
                 "employees": employee_list,
                 "count": len(employee_list),
@@ -745,17 +951,21 @@ def search_employees_tool(search_term: str, limit: int = 50, db: Session = None)
         )
         
     except Exception as e:
-        # Ensure database session is closed even on error
-        try:
-            if 'db' in locals() and db is not None:
+        # 🚀 PERFORMANCE OPTIMIZATION: Only close session if we created it
+        # TODO: If database session issues occur, revert to always closing sessions
+        if should_close and 'db' in locals() and db is not None:
+            try:
                 db.close()
-        except Exception:
-            pass
+            except Exception:
+                pass
         
         return EmployeeToolResult(
             success=False,
             message=f"❌ Failed to search employees: {str(e)}"
         )
+
+
+
 
 def get_employee_details_tool(employee_id: int, db: Session = None) -> EmployeeToolResult:
     """Tool for getting detailed employee information"""

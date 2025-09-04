@@ -228,14 +228,16 @@ class TimeTrackerAgent:
                 {"role": "user", "content": f"Context: {json.dumps(json_safe_context)}\n\nMessage: {sanitized_message}"}
             ]
             
-            # Process through OpenAI with function calling
+            # 🚀 PHASE 1 OPTIMIZATION: Reduced timeout and optimized parameters for faster responses
+            # TODO: If performance degrades, revert temperature to 0.7 and max_tokens to 1000
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=self.tools,
                 tool_choice="auto",  # Let the LLM decide which tools to use
-                temperature=0.7,
-                max_tokens=1000
+                temperature=0.1,     # 🚀 OPTIMIZATION: Reduced from 0.7 to 0.1 for faster, more deterministic responses
+                max_tokens=500,      # 🚀 OPTIMIZATION: Reduced from 1000 to 500 for faster generation
+                timeout=10.0         # 🚀 OPTIMIZATION: Added 10s timeout for faster failure detection
             )
             
             response_message = response.choices[0].message
@@ -259,11 +261,14 @@ class TimeTrackerAgent:
                     })
                 
                 # Get final response from LLM after tool execution
+                # 🚀 PHASE 1 OPTIMIZATION: Reduced timeout and optimized parameters for faster responses
+                # TODO: If performance degrades, revert temperature to 0.7 and max_tokens to 1000
                 final_response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    temperature=0.7,
-                    max_tokens=1000
+                    temperature=0.1,     # 🚀 OPTIMIZATION: Reduced from 0.7 to 0.1 for faster, more deterministic responses
+                    max_tokens=500,      # 🚀 OPTIMIZATION: Reduced from 1000 to 500 for faster generation
+                    timeout=10.0         # 🚀 OPTIMIZATION: Added 10s timeout for faster failure detection
                 )
                 
                 response_content = final_response.choices[0].message.content

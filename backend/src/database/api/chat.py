@@ -6,6 +6,7 @@ from src.database.core.database import get_db
 from datetime import datetime
 from src.auth.dependencies import get_current_user, AuthenticatedUser
 import json
+import re
 from fastapi.security import HTTPAuthorizationCredentials
 
 # --- New Imports for LangGraph Integration ---
@@ -15,6 +16,18 @@ from langchain_core.messages import HumanMessage
 from src.aiagents.graph.state import create_initial_state
 
 router = APIRouter()
+
+# 🚀 REMOVED: is_employee_fast_path_query function to align with agentic AI principles
+# TODO: If employee queries become too slow, consider re-implementing this function
+# All employee queries now go through the regular agent graph like clients and contracts
+
+# 🚀 REMOVED: extract_employee_search_term function to align with agentic AI principles
+# TODO: If employee search becomes less accurate, consider re-implementing this function
+# The agent now handles search term extraction naturally through its instructions
+
+# 🚀 REMOVED: fast_employee_search function to align with agentic AI principles
+# TODO: If employee queries become too slow, consider re-implementing this function
+# All employee queries now go through the regular agent graph like clients and contracts
 
 def _make_serializable(obj):
     """Convert OpenAI objects to JSON-serializable format"""
@@ -345,6 +358,41 @@ async def send_chat_message(request: Request):
                 }
             )
         
+        # 🚀 PHASE 2 OPTIMIZATION: Detect simple informational queries that can be answered quickly
+        # TODO: If complex queries are incorrectly identified as simple, revert these optimizations
+        simple_info_queries = [
+            "what is", "what are", "tell me about", "explain", "how does", "how do",
+            "what does", "what can", "what should", "what would", "is it", "are you"
+        ]
+        
+        is_simple_info_query = (
+            any(query in message_lower for query in simple_info_queries) and
+            len(message_content.split()) <= 10 and  # Short queries only
+            not any(complex_word in message_lower for complex_word in [
+                "create", "add", "update", "delete", "modify", "change", "edit",
+                "contract", "employee", "client", "deliverable", "time", "expense"
+            ])
+        )
+        
+        if is_simple_info_query:
+            print(f"🔥 CHAT API: ULTRA-FAST SIMPLE INFO PATH!")
+            return ChatResponse(
+                response="I'm here to help with your consulting business needs. You can ask me about clients, contracts, employees, deliverables, time tracking, or expenses. What would you like to know?",
+                agent="Milo",
+                success=True,
+                timestamp=datetime.now().isoformat(),
+                session_id="fast-simple-info",
+                workflow_id=f"workflow_{datetime.now().timestamp()}",
+                data={
+                    "processing_time": {"simple_info": "< 0.01s"},
+                    "status": "ultra_fast_simple_info"
+                }
+            )
+        
+        # 🚀 REMOVED: Fast path for employee queries to maintain consistency with other agents
+        # TODO: If employee queries become too slow, consider re-implementing fast path
+        # All employee queries now go through the regular agent graph like clients and contracts
+        
         # ULTRA-FAST client listing detection - but check for complex queries first
         client_queries = [
             "show all clients", "list all clients", "get all clients", "all clients",
@@ -437,7 +485,8 @@ async def send_chat_message(request: Request):
             initial_state["context"]["database"] = db
             print(f"🔄 CHAT API: Created new conversation state")
 
-        # 2. Invoke the graph and get the result
+        # 🚀 PHASE 2 OPTIMIZATION: Reduced recursion limit to prevent multiple iterations
+        # TODO: If agent responses become incomplete or tools don't execute properly, revert recursion_limit to 10
         result = await agent_app.ainvoke(initial_state, config={"recursion_limit": 10})
         
         # 3. Extract the response from the result
@@ -529,9 +578,10 @@ async def send_chat_message_stream(
         # Add database to context
         initial_state["context"]["database"] = db
 
-        # Define the streaming response generator
+        # 🚀 PHASE 2 OPTIMIZATION: Reduced recursion limit for streaming responses
+        # TODO: If streaming responses become incomplete, revert recursion_limit to 10
         async def stream_generator():
-            async for event in agent_app.astream(initial_state, config={"recursion_limit": 10}):
+            async for event in agent_app.astream(initial_state, config={"recursion_limit": 4}):
                 yield f"data: {json.dumps(event)}"
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream")

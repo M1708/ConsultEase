@@ -53,7 +53,7 @@ class EnhancedAgentNodeExecutor:
         self.agent_prompt_mapping = {
             "client_agent": PromptTemplate.CLIENT_AGENT,
             "contract_agent": PromptTemplate.CONTRACT_AGENT,
-            "employee_agent": PromptTemplate.EMPLOYEE_AGENT,
+            "employee_agent": PromptTemplate.EMPLOYEE_AGENT,  # 🚀 RESTORED: Employee agent needs dynamic prompts for specific formatting
             "deliverable_agent": PromptTemplate.DELIVERABLE_AGENT,
             "time_agent": PromptTemplate.TIME_AGENT,
             "user_agent": PromptTemplate.USER_AGENT,
@@ -72,6 +72,7 @@ class EnhancedAgentNodeExecutor:
         Performance target: <200ms total execution time
         """
         start_time = time.perf_counter()
+        
         
         try:
             # Generate cache key for potential response caching
@@ -95,12 +96,14 @@ class EnhancedAgentNodeExecutor:
                 state, system_prompt
             )
             
+            
             # Execute with performance monitoring
             response = await self._execute_with_monitoring(
                 prepared_messages, agent_instance.tools, agent_name
             )
             
             response_message = response.choices[0].message
+            
             
             # Update performance tracking
             processing_time = time.perf_counter() - start_time
@@ -251,13 +254,16 @@ class EnhancedAgentNodeExecutor:
             raise Exception("OpenAI client not available - using fallback mode")
         
         try:
+            # 🚀 PHASE 1 OPTIMIZATION: Reduced timeout and optimized parameters for faster responses
+            # TODO: If performance degrades, revert timeout to 30.0 and temperature to 0.1
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=prepared_messages,
                 tools=tools,
                 tool_choice="auto",
-                temperature=0.1,
-                timeout=30.0  # Prevent hanging requests
+                temperature=0.1,  # Keep low for deterministic, faster responses
+                timeout=10.0,     # 🚀 OPTIMIZATION: Reduced from 30s to 10s for faster failure detection
+                max_tokens=500    # 🚀 OPTIMIZATION: Reduced from default to 500 for faster generation
             )
             
             execution_time = time.perf_counter() - execution_start
@@ -422,15 +428,20 @@ class EnhancedAgentNodeExecutor:
                 prepared_messages.append({"role": "user", "content": str(msg)})
 
         try:
+            # 🚀 PHASE 1 OPTIMIZATION: Reduced timeout and optimized parameters for faster responses
+            # TODO: If performance degrades, revert timeout to 30.0 and temperature to 0.1
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=prepared_messages,
                 tools=tools,
                 tool_choice="auto",
-                temperature=0.1,
+                temperature=0.1,  # Keep low for deterministic, faster responses
+                timeout=10.0,     # 🚀 OPTIMIZATION: Reduced from 30s to 10s for faster failure detection
+                max_tokens=500    # 🚀 OPTIMIZATION: Reduced from default to 500 for faster generation
             )
             
             response_message = response.choices[0].message
+
             return {"messages": [response_message]}
         except Exception as e:
             print(f"⚠️ OpenAI API call failed: {e}, using fallback tool selection")
@@ -572,23 +583,39 @@ class EnhancedAgentNodeExecutor:
         
         # Employee retrieval detection
         elif any(word in user_message_lower for word in ["employee", "employees", "staff"]):
+            # 🚀 PHASE 3A: Check for advanced employee queries first
+            # TODO: If this causes issues with simple queries, revert to original logic
+            # 🚀 PHASE 3A: DISABLED - Advanced query detection causing issues
+            # TODO: Re-enable when detection logic is fixed
+            # advanced_query = self._detect_advanced_employee_query(user_message)
+            # 
+            # if advanced_query["is_advanced"]:
+            #     # Use advanced search with detected criteria
+            #     selected_tool = "search_employees_advanced"
+            #     tool_args = advanced_query["criteria"]
+            #     print(f"🔧 Fallback: Detected advanced employee query with criteria: {tool_args}")
+            #     print(f"🔧 DEBUG: Advanced query detection result: {advanced_query}")
+            #     print(f"🔧 DEBUG: Selected tool: {selected_tool}")
+            #     print(f"🔧 DEBUG: Tool args: {tool_args}")
+            # elif "all employees" in user_message_lower or "show me all employees" in user_message_lower:
+            
+
+            
+            # 🚀 SIMPLIFIED: Let the agent handle search term extraction naturally
+            # TODO: If employee search becomes less accurate, consider re-implementing search term extraction
             if "all employees" in user_message_lower or "show me all employees" in user_message_lower:
                 selected_tool = "get_all_employees"
                 print(f"🔧 Fallback: Detected all employees retrieval")
-            elif any(word in user_message_lower for word in ["search", "find"]):
-                # Extract search term
-                search_term = self._extract_employee_search_term(user_message)
-                if search_term:
-                    selected_tool = "search_employees"
-                    tool_args = {"search_term": search_term}
-                    print(f"🔧 Fallback: Detected employee search for '{search_term}'")
             else:
-                # Default to getting all employees
-                selected_tool = "get_all_employees"
-                print(f"🔧 Fallback: Detected employee-related request")
+                # 🚀 AGENTIC: Let the agent handle search term extraction through its instructions
+                # TODO: If employee search becomes less accurate, consider re-implementing search term extraction
+                selected_tool = "search_employees"
+                tool_args = {"search_term": user_message}
+                print(f"🔧 Fallback: Using original message as search term - agent should extract key terms")
         
         # Execute the selected tool
         if selected_tool and selected_tool in TOOL_REGISTRY:
+
             try:
                 # Add database session and context
                 db_session = state.get('data', {}).get('database')
@@ -631,49 +658,11 @@ class EnhancedAgentNodeExecutor:
 
 
 
-    def _extract_employee_search_term(self, message: str) -> str:
-        """Extract employee search term from message"""
-        message_lower = message.lower()
-        
-        # Remove common prefixes
-        prefixes_to_remove = [
-            "search for",
-            "find",
-            "look for",
-            "show me",
-            "get",
-            "retrieve",
-            "employees",
-            "employee",
-            "staff"
-        ]
-        
-        cleaned_message = message
-        for prefix in prefixes_to_remove:
-            if cleaned_message.lower().startswith(prefix.lower()):
-                cleaned_message = cleaned_message[len(prefix):].strip()
-                break
-        
-        # Remove common suffixes
-        suffixes_to_remove = [
-            "in the",
-            "department",
-            "team",
-            "division",
-            "section"
-        ]
-        
-        for suffix in suffixes_to_remove:
-            if cleaned_message.lower().endswith(suffix.lower()):
-                cleaned_message = cleaned_message[:-len(suffix)].strip()
-                break
-        
-        # Clean up extra spaces and punctuation
-        import re
-        cleaned_message = re.sub(r'\s+', ' ', cleaned_message)
-        cleaned_message = cleaned_message.strip('.,;:!?')
-        
-        return cleaned_message if cleaned_message else "all"
+    # 🚀 REMOVED: _extract_employee_search_term function to align with agentic AI principles
+    # TODO: If employee search becomes less accurate, consider re-implementing this function
+    # The agent now handles search term extraction naturally through its instructions
+
+
     
     def _extract_employee_creation_info(self, message: str) -> Dict[str, Any]:
         """Extract employee creation information from message"""
@@ -1038,6 +1027,7 @@ class EnhancedAgentNodeExecutor:
     
     def _format_tool_result(self, result: dict, tool_name: str) -> str:
         """Format tool result for display"""
+        
         if not result.get('data'):
             return result.get('message', 'Operation completed.')
         
@@ -1078,71 +1068,18 @@ class EnhancedAgentNodeExecutor:
             return f"✅ Contract updated successfully! {result.get('message', '')}"
         
         elif tool_name == "get_all_employees":
-            # Format employee list information
-            if isinstance(data, dict) and 'employees' in data:
-                employees = data['employees']
-                count = data.get('count', 0)
-                
-                response = f"📋 **Employee Directory** - Found {count} employee(s) in the system\n\n"
-                
-                for i, emp in enumerate(employees, 1):
-                    profile = emp.get('profile', {})
-                    full_name = profile.get('full_name', 'Unknown')
-                    job_title = emp.get('job_title', 'N/A')
-                    department = emp.get('department', 'N/A')
-                    employment_type = emp.get('employment_type', 'N/A')
-                    hire_date = emp.get('hire_date', 'N/A')
-                    
-                    response += f"### {i}. {full_name}\n"
-                    response += f"- **Job Title:** {job_title}\n"
-                    response += f"- **Department:** {department}\n"
-                    response += f"- **Employment Type:** {employment_type}\n"
-                    response += f"- **Hire Date:** {hire_date}\n"
-                    
-                    # Add rate information if available
-                    if emp.get('rate'):
-                        rate = emp.get('rate')
-                        currency = emp.get('currency', 'USD')
-                        rate_type = emp.get('rate_type', 'N/A')
-                        response += f"- **Rate:** {rate} {currency} ({rate_type})\n"
-                    
-                    response += "\n"
-                
-                response += "If you need more details about a specific employee or want to perform other operations, feel free to ask!"
-                return response
+            # 🚀 REMOVED: Hard-coded formatting to let the agent handle it naturally
+            # TODO: If employee responses become less formatted, consider re-implementing this formatting
+            # The agent now handles employee list formatting through its instructions
+            return result.get('message', 'Employee list retrieved.')
         
         elif tool_name == "search_employees":
-            # Format employee search results
-            if isinstance(data, dict) and 'employees' in data:
-                employees = data['employees']
-                count = data.get('count', 0)
-                search_term = data.get('search_term', 'Unknown')
-                
-                response = f"🔍 **Employee Search Results** for '{search_term}' - Found {count} employee(s)\n\n"
-                
-                for i, emp in enumerate(employees, 1):
-                    profile = emp.get('profile', {})
-                    full_name = profile.get('full_name', 'Unknown')
-                    job_title = emp.get('job_title', 'N/A')
-                    department = emp.get('department', 'N/A')
-                    employment_type = emp.get('employment_type', 'N/A')
-                    
-                    response += f"### {i}. {full_name}\n"
-                    response += f"- **Job Title:** {job_title}\n"
-                    response += f"- **Department:** {department}\n"
-                    response += f"- **Employment Type:** {employment_type}\n"
-                    
-                    # Add rate information if available
-                    if emp.get('rate'):
-                        rate = emp.get('rate')
-                        currency = emp.get('currency', 'USD')
-                        rate_type = emp.get('rate_type', 'N/A')
-                        response += f"- **Rate:** {rate} {currency} ({rate_type})\n"
-                    
-                    response += "\n"
-                
-                response += "If you need more details about a specific employee or want to perform other operations, feel free to ask!"
-                return response
+            # 🚀 REMOVED: Hard-coded formatting to let the agent handle it naturally
+            # TODO: If employee responses become less formatted, consider re-implementing this formatting
+            # The agent now handles search result formatting through its instructions
+            return result.get('message', 'Employee search completed.')
+        
+
         
         elif tool_name == "get_employee_details":
             # Format individual employee details
