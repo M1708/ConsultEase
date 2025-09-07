@@ -3,6 +3,7 @@ import os
 import json
 import time
 import asyncio
+import re
 from openai import OpenAI
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -75,6 +76,14 @@ class EnhancedAgentNodeExecutor:
         
         
         try:
+            # 🚀 PERFORMANCE OPTIMIZATION: Track agent execution for contract search optimization
+            # TODO: Remove debug statements once performance is optimized
+            print(f"🔧 DEBUG: Starting {agent_name} execution")
+            if state.get('messages'):
+                last_message = state['messages'][-1]
+                if hasattr(last_message, 'content'):
+                    print(f"🔧 DEBUG: User message: '{last_message.content[:100]}...'")
+            
             # Generate cache key for potential response caching
             cache_key = self._generate_cache_key(state, agent_name)
             
@@ -103,7 +112,6 @@ class EnhancedAgentNodeExecutor:
             )
             
             response_message = response.choices[0].message
-            
             
             # Update performance tracking
             processing_time = time.perf_counter() - start_time
@@ -262,8 +270,8 @@ class EnhancedAgentNodeExecutor:
                 tools=tools,
                 tool_choice="auto",
                 temperature=0.1,  # Keep low for deterministic, faster responses
-                timeout=10.0,     # 🚀 OPTIMIZATION: Reduced from 30s to 10s for faster failure detection
-                max_tokens=500    # 🚀 OPTIMIZATION: Reduced from default to 500 for faster generation
+                timeout=15.0,     # 🚀 OPTIMIZATION: Balanced timeout - sufficient for formatting, faster failure detection
+                max_tokens=2000   # 🚀 OPTIMIZATION: Increased to 2000 to handle multiple contract listings without truncation
             )
             
             execution_time = time.perf_counter() - execution_start
@@ -436,8 +444,8 @@ class EnhancedAgentNodeExecutor:
                 tools=tools,
                 tool_choice="auto",
                 temperature=0.1,  # Keep low for deterministic, faster responses
-                timeout=10.0,     # 🚀 OPTIMIZATION: Reduced from 30s to 10s for faster failure detection
-                max_tokens=500    # 🚀 OPTIMIZATION: Reduced from default to 500 for faster generation
+                timeout=15.0,     # 🚀 OPTIMIZATION: Balanced timeout - sufficient for formatting, faster failure detection
+                max_tokens=2000   # 🚀 OPTIMIZATION: Increased to 2000 to handle multiple contract listings without truncation
             )
             
             response_message = response.choices[0].message
@@ -618,14 +626,14 @@ class EnhancedAgentNodeExecutor:
 
             try:
                 # Add database session and context
-                db_session = state.get('data', {}).get('database')
+                #db_session = state.get('data', {}).get('database')
                 context = state.get('context', {})
-                tool_args['db'] = db_session
+                #tool_args['db'] = db_session
                 tool_args['context'] = context
                 
                 # Execute the tool
                 tool_function = TOOL_REGISTRY[selected_tool]
-                result = tool_function(**tool_args)
+                result = await tool_function(**tool_args)
                 
                 # Format the response
                 if isinstance(result, dict) and result.get('success'):
@@ -802,7 +810,6 @@ class EnhancedAgentNodeExecutor:
                     return client.title()
         
         # Try to extract from common patterns - improved regex patterns
-        import re
         patterns = [
             # More specific patterns for client names
             r"for\s+client\s+([A-Za-z][A-Za-z\s&.,'-]+?)(?:\s*\.|\s*,|\s*;|\s+it's|\s+with|\s+that|\s+who|\s*$)",
@@ -1215,6 +1222,11 @@ class EnhancedAgentNodeExecutor:
                 response += "If you need more details about a specific contract or want to perform other operations, feel free to ask!"
                 return response
         
+        elif tool_name == "search_contracts":
+            # 🚀 AGENTIC: Let the agent handle formatting through its dynamic instructions
+            # TODO: If contract formatting becomes inconsistent, consider adding specific formatting instructions to dynamic prompts
+            return result.get('message', 'Contract search completed.')
+        
         # Default formatting
         return result.get('message', 'Operation completed successfully.')
     
@@ -1242,7 +1254,23 @@ def contract_agent_node_sync(state: AgentState) -> Dict:
 def employee_agent_node_sync(state: AgentState) -> Dict:
     """Sync wrapper for employee agent node."""
     print("--- Running Enhanced Employee Agent Node (Sync) ---")
-    return asyncio.run(enhanced_executor.invoke(state, employee_agent_instance, "employee_agent"))
+    
+    # 🔧 DEBUG: Track agent input state
+    print(f"🔧 DEBUG: Employee agent input state (sync) - messages count: {len(state.get('messages', []))}")
+    if state.get('messages'):
+        last_message = state['messages'][-1]
+        print(f"🔧 DEBUG: Last user message (sync): '{last_message.content[:100] if hasattr(last_message, 'content') else 'N/A'}...'")
+    
+    result = asyncio.run(enhanced_executor.invoke(state, employee_agent_instance, "employee_agent"))
+    
+    # 🔧 DEBUG: Track agent output
+    print(f"🔧 DEBUG: Employee agent output (sync) - messages count: {len(result.get('messages', []))}")
+    if result.get('messages'):
+        last_response = result['messages'][-1]
+        content = getattr(last_response, 'content', None)
+        print(f"🔧 DEBUG: Agent response (sync): '{content[:200] if content else 'N/A'}...'")
+    
+    return result
 
 def client_agent_node_sync(state: AgentState) -> Dict:
     """Sync wrapper for client agent node."""
@@ -1277,7 +1305,23 @@ async def employee_agent_node_async(state: AgentState) -> Dict:
     Enhanced employee agent node with memory integration.
     """
     print("--- Running Enhanced Employee Agent Node ---")
-    return await enhanced_executor.invoke(state, employee_agent_instance, "employee_agent")
+    
+    # 🔧 DEBUG: Track agent input state
+    print(f"🔧 DEBUG: Employee agent input state - messages count: {len(state.get('messages', []))}")
+    if state.get('messages'):
+        last_message = state['messages'][-1]
+        print(f"🔧 DEBUG: Last user message: '{last_message.content[:100] if hasattr(last_message, 'content') else 'N/A'}...'")
+    
+    result = await enhanced_executor.invoke(state, employee_agent_instance, "employee_agent")
+    
+    # 🔧 DEBUG: Track agent output
+    print(f"🔧 DEBUG: Employee agent output - messages count: {len(result.get('messages', []))}")
+    if result.get('messages'):
+        last_response = result['messages'][-1]
+        content = getattr(last_response, 'content', None)
+        print(f"🔧 DEBUG: Agent response: '{content[:200] if content else 'N/A'}...'")
+    
+    return result
 
 async def client_agent_node_async(state: AgentState) -> Dict:
     """

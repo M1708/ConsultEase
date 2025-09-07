@@ -210,7 +210,10 @@ class ContractAgent:
                             "min_amount": {"type": "number", "description": "Minimum contract amount"},
                             "max_amount": {"type": "number", "description": "Maximum contract amount"},
                             "start_date_from": {"type": "string", "description": "Filter contracts starting from this date (YYYY-MM-DD)"},
-                            "start_date_to": {"type": "string", "description": "Filter contracts starting before this date (YYYY-MM-DD)"}
+                            "start_date_to": {"type": "string", "description": "Filter contracts starting before this date (YYYY-MM-DD)"},
+                            # TODO: If contract search becomes slow or unreliable, revert these new search parameters
+                            "billing_date_next_month": {"type": "boolean", "description": "Filter contracts with billing dates in the next month"},
+                            "billing_date_is_null": {"type": "boolean", "description": "Filter contracts with no billing date set"}
                         },
                         "required": []
                     }

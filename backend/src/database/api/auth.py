@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Header
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Optional
 from src.database.core.database import get_db
 from src.database.core.models import User
@@ -12,7 +13,7 @@ router = APIRouter()
 @router.get("/profile/{auth_user_id}")
 async def get_user_profile(
     auth_user_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     authorization: Optional[str] = Header(None)
 ):
     """Get user profile by Supabase auth user ID"""
@@ -27,14 +28,16 @@ async def get_user_profile(
                 raise HTTPException(status_code=403, detail="Access denied")
         
         # Find user by auth_user_id
-        user = db.query(User).filter(User.auth_user_id == auth_user_id).first()
+        temp = await db.execute(select(User).filter(User.auth_user_id == auth_user_id))
+        user = temp.scalar_one_or_none()
+        ###user = db.query(User).filter(User.auth_user_id == auth_user_id).first()
         
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
         # Update last login
         user.last_login = datetime.utcnow()
-        db.commit()
+        await db.commit()
         
         return {
             "user_id": str(user.user_id),
@@ -64,7 +67,7 @@ async def get_user_profile(
 @router.patch("/users/{user_id}/last-login")
 async def update_last_login(
     user_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     authorization: Optional[str] = Header(None)
 ):
     """Update user's last login timestamp"""
@@ -73,13 +76,16 @@ async def update_last_login(
             token = authorization.replace("Bearer ", "")
             verify_supabase_jwt(token)
         
+        temp = await db.execute(select(User).filter(User.user_id == user_id))
+        user = temp.scalar_one_or_none()
+        ###user = db.query(User).filter(User.user_id == user_id).first()
         user = db.query(User).filter(User.user_id == user_id).first()
         
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
         user.last_login = datetime.utcnow()
-        db.commit()
+        await db.commit()
         
         return {"message": "Last login updated successfully"}
         
@@ -89,7 +95,7 @@ async def update_last_login(
 @router.get("/me")
 async def get_current_user(
     authorization: str = Header(...),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Get current authenticated user"""
     try:
@@ -100,7 +106,9 @@ async def get_current_user(
         if not auth_user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
         
-        user = db.query(User).filter(User.auth_user_id == auth_user_id).first()
+        temp = await db.execute(select(User).filter(User.auth_user_id == auth_user_id))
+        user = temp.scalar_one_or_none()
+        ###user = db.query(User).filter(User.auth_user_id == auth_user_id).first()
         
         if not user:
             raise HTTPException(status_code=404, detail="User not found")

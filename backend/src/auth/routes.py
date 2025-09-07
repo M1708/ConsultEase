@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from datetime import datetime
+#from src.database.core.database import get_db
 from src.database.core.database import get_db
 from src.database.core.models import User
 from src.auth.dependencies import get_current_user, AuthenticatedUser
@@ -39,11 +42,14 @@ async def get_user_profile(current_user: AuthenticatedUser = Depends(get_current
 @router.get("/profile/{user_id}", response_model=UserProfileResponse)
 async def get_user_profile_by_id(
     user_id: str,
-    db: Session = Depends(get_db)
+    session: AsyncSession = Depends(get_db)
+
 ):
     """Get user profile by user ID (for internal use)"""
     try:
-        user = db.query(User).filter(User.user_id == user_id).first()
+        temp = await session.execute(select(User).filter(User.user_id == user_id))
+        user = temp.scalar_one_or_none()
+        ##user = db.query(User).filter(User.user_id == user_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -66,19 +72,22 @@ async def get_user_profile_by_id(
             created_at=user.created_at,
             updated_at=user.updated_at
         )
-    finally:
-        db.close()
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get user profile: {str(e)}")
 
 @router.patch("/users/{user_id}/last-login")
 async def update_last_login(
     user_id: str,
-    db: Session = Depends(get_db)
+    session: AsyncSession = Depends(get_db)
+
 ):
     """Update user's last login timestamp"""
     try:
-        from datetime import datetime
         
-        user = db.query(User).filter(User.user_id == user_id).first()
+        temp = await session.execute(select(User).filter(User.user_id == user_id))
+        user = temp.scalar_one_or_none()
+        ###user = db.query(User).filter(User.user_id == user_id).first()
+        
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -86,11 +95,11 @@ async def update_last_login(
             )
         
         user.last_login = datetime.utcnow()
-        db.commit()
+        await session.commit()
         
         return {"message": "Last login updated successfully"}
     finally:
-        db.close()
+        print("Do not close the db session")
 
 @router.get("/session", response_model=SessionResponse)
 async def get_current_session(current_user: AuthenticatedUser = Depends(get_current_user)):

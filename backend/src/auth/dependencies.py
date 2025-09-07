@@ -1,10 +1,12 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from supabase import create_client, Client
 from src.database.core.database import get_db
 from src.database.core.models import User
 from src.auth.session_manager import SessionManager
+from datetime import datetime
 import os
 
 # Initialize Supabase client
@@ -26,7 +28,7 @@ class AuthenticatedUser:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ) -> AuthenticatedUser:
     """Get current authenticated user from JWT token"""
     try:
@@ -43,7 +45,9 @@ async def get_current_user(
         auth_user = response.user
         
         # Get user profile from database - profile_id equals auth user id
-        user = db.query(User).filter(User.user_id == auth_user.id).first()
+        temp = await db.execute(select(User).filter(User.user_id == auth_user.id))
+        user = temp.scalar_one_or_none()
+        #user = db.query(User).filter(User.user_id == auth_user.id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -66,9 +70,9 @@ async def get_current_user(
         )
         
         # Update last login
-        from datetime import datetime
+        
         user.last_login = datetime.utcnow()
-        db.commit()
+        await db.commit()
         
         return AuthenticatedUser(user, session_id)
         

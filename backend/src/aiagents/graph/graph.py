@@ -114,61 +114,29 @@ def after_agent_execution(state: AgentState) -> str:
 # This function decides what to do after tool execution
 def after_tool_execution(state: AgentState) -> str:
     """Decides whether to continue with the agent or end the conversation."""
-    # 🚀 PHASE 2 OPTIMIZATION: Early termination checks to prevent unnecessary iterations
-    # TODO: If agents stop processing tool results properly, revert these early termination checks
+    # 🚀 PERFORMANCE OPTIMIZATION: Track execution flow for contract search optimization
+    # TODO: Remove debug statements once performance is optimized
+    print(f"🔧 DEBUG: after_tool_execution called with {len(state['messages'])} messages")
     
-    # Check if we have too many messages (prevent infinite loops)
-    if len(state['messages']) > 15:  # 🚀 OPTIMIZATION: Reduced from 20 to 15 for faster termination
-        print(f"🛑 Early termination: Too many messages ({len(state['messages'])})")
-        return END
-    
-    # 🚀 PHASE 2 OPTIMIZATION: Check if tool execution was successful and complete
-    last_message = state['messages'][-1]
-    if hasattr(last_message, 'content'):
-        try:
-            import json
-            content = json.loads(last_message.content)
-            if isinstance(content, dict):
-                # If there's an error, end the conversation to prevent loops
-                if content.get('error'):
-                    print(f"🛑 Early termination: Tool execution error")
-                    return END
-                # 🚀 OPTIMIZATION: If tool execution was successful and returned data, end to prevent re-processing
-                if content.get('success') and content.get('data') and not content.get('requires_confirmation'):
-                    print(f"🛑 Early termination: Tool execution successful, no further processing needed")
-                    return END
-        except:
-            pass
-    
-    # 🚀 PHASE 2 OPTIMIZATION: More aggressive loop prevention
-    recent_messages = state['messages'][-4:]  # 🚀 OPTIMIZATION: Reduced from 6 to 4 messages
-    tool_calls = []
-    for msg in recent_messages:
-        if hasattr(msg, 'tool_calls') and msg.tool_calls:
-            for tool_call in msg.tool_calls:
-                tool_calls.append((tool_call.function.name, tool_call.function.arguments))
-    
-    # 🚀 OPTIMIZATION: If we see any repeated tool calls, end to prevent loops
-    if len(tool_calls) > 1:  # 🚀 OPTIMIZATION: Reduced from 2 to 1
-        unique_calls = set(tool_calls)
-        if len(unique_calls) == 1:  # Same call repeated
-            print(f"🛑 Early termination: Repeated tool call detected")
-            return END
-    
-    # 🚀 PHASE 2 OPTIMIZATION: Check if we've already processed this tool result
-    if len(state['messages']) >= 3:
-        # Check if the last 3 messages form a complete tool execution cycle
-        last_three = state['messages'][-3:]
-        has_tool_call = any(hasattr(msg, 'tool_calls') and msg.tool_calls for msg in last_three)
-        has_tool_result = any(hasattr(msg, 'role') and msg.role == 'tool' for msg in last_three)
-        has_agent_response = any(hasattr(msg, 'role') and msg.role == 'assistant' for msg in last_three)
+    # 🚀 OPTIMIZATION: Early termination for successful tool results to prevent loops
+    # TODO: If agents stop processing tool results properly, revert this optimization
+    if len(state['messages']) > 0:
+        last_message = state['messages'][-1]
+        print(f"🔧 DEBUG: Last message type: {type(last_message)}")
+        print(f"🔧 DEBUG: Last message role: {getattr(last_message, 'role', 'no role')}")
         
-        if has_tool_call and has_tool_result and has_agent_response:
-            print(f"🛑 Early termination: Complete tool execution cycle detected")
-            return END
+        # 🔧 FIX: Always let agent format tool results - remove early termination optimization
+        # TODO: This ensures agent can format all tool results properly instead of returning raw JSON
+        if isinstance(last_message, dict) and "content" in last_message:
+            print(f"🔧 DEBUG: Last message is dict with content - letting agent format")
+        elif hasattr(last_message, 'content') and last_message.content:
+            print(f"🔧 DEBUG: Last message content preview: {str(last_message.content)[:200]}... - letting agent format")
+        else:
+            print(f"🔧 DEBUG: Last message has no content or content is empty")
     
     # CRITICAL FIX: After tool execution, always return to the current agent
     # so it can process and format the tool results
+    print(f"🔧 DEBUG: Returning to agent: {state['current_agent']}")
     return state["current_agent"]
 
 # After any agent runs, we check if we need to run tools

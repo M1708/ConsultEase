@@ -101,11 +101,11 @@ class EmployeeAgent:
                 "type": "function",
                 "function": {
                     "name": "search_employees",
-                    "description": "Search for employees by name, job title, or department",
+                    "description": "Search for employees by name, job title, department, employment type, or any other criteria. This tool is designed to handle filtering and can process various search terms to find matching employees.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "search_term": {"type": "string", "description": "Search term"}
+                            "search_term": {"type": "string", "description": "Search term (e.g., 'software engineer', 'part-time', 'marketing', 'John Doe')"}
                         },
                         "required": ["search_term"]
                     }
@@ -130,7 +130,7 @@ class EmployeeAgent:
                 "type": "function",
                 "function": {
                     "name": "get_all_employees",
-                    "description": "Get a list of all employees in the system.",
+                    "description": "Get a list of all employees in the system. This tool returns comprehensive employee information without filtering.",
                     "parameters": {"type": "object", "properties": {}}
                 }
             },

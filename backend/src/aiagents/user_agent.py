@@ -27,34 +27,34 @@ class UserAgent:
         
         self.tools = self._get_tool_schemas()
     
-    def _create_user_wrapper(self, **kwargs) -> Dict[str, Any]:
-        db = kwargs.pop('db', None)
+    async def _create_user_wrapper(self, **kwargs) -> Dict[str, Any]:
+        kwargs.pop('db', None)
         params = CreateUserParams(**kwargs)
-        result = create_user_tool(params, db)
+        result = await create_user_tool(params)
         return result.model_dump()
 
-    def _get_user_details_wrapper(self, **kwargs) -> Dict[str, Any]:
-        db = kwargs.pop('db', None)
+    async def _get_user_details_wrapper(self, **kwargs) -> Dict[str, Any]:
+        kwargs.pop('db', None)
         params = GetUserDetailsParams(**kwargs)
-        result = get_user_details_tool(params, db)
+        result = await get_user_details_tool(params)
         return result.model_dump()
 
-    def _update_user_wrapper(self, **kwargs) -> Dict[str, Any]:
-        db = kwargs.pop('db', None)
+    async def _update_user_wrapper(self, **kwargs) -> Dict[str, Any]:
+        kwargs.pop('db', None)
         params = UpdateUserParams(**kwargs)
-        result = update_user_tool(params, db)
+        result = await update_user_tool(params)
         return result.model_dump()
 
-    def _delete_user_wrapper(self, **kwargs) -> Dict[str, Any]:
-        db = kwargs.pop('db', None)
+    async def _delete_user_wrapper(self, **kwargs) -> Dict[str, Any]:
+        kwargs.pop('db', None)
         params = DeleteUserParams(**kwargs)
-        result = delete_user_tool(params, db)
+        result = await delete_user_tool(params)
         return result.model_dump()
 
-    def _search_users_wrapper(self, **kwargs) -> Dict[str, Any]:
+    async def _search_users_wrapper(self, **kwargs) -> Dict[str, Any]:
         db = kwargs.pop('db', None)
         params = SearchUsersParams(**kwargs)
-        result = search_users_tool(params, db)
+        result = await search_users_tool(params)
         return result.model_dump()
     
     def _get_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -197,8 +197,8 @@ class UserAgent:
                     "data": None
                 }
             
-            db = context.get("database")
-            function_args['db'] = db
+            #db = context.get("database")
+            #function_args['db'] = db
             function_args['context'] = context
             
             if function_name in self.tool_functions:

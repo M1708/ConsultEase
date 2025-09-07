@@ -1,9 +1,12 @@
 
 import json
 from typing import Dict, Any, List
+import re
+from datetime import datetime
+from sqlalchemy import select
 
 from src.aiagents.graph.state import AgentState
-
+from src.database.core.database import get_ai_db
 # --- Import all tool functions and params from the existing tool files ---
 from src.aiagents.tools.contract_tools import (
     create_client_tool, search_clients_tool, get_all_clients_tool,
@@ -20,8 +23,9 @@ from  src.aiagents.tools.client_tools import (
 from src.aiagents.tools.employee_tools import (
     create_employee_tool, update_employee_tool, search_employees_tool,
     get_employee_details_tool, get_all_employees_tool, search_profiles_by_name_tool,
-    CreateEmployeeParams, UpdateEmployeeParams
+    CreateEmployeeParams, UpdateEmployeeParams, parse_employee_details_from_message
 )
+from src.database.core.models import Employee
 # ... import other tools for other agents as they are integrated
 
 # --- Tool Wrappers (migrated from ContractAgent) ---
@@ -364,16 +368,16 @@ def _search_contracts_wrapper(**kwargs) -> Dict[str, Any]:
     return result.model_dump()
 
 # --- Employee Tool Wrappers ---
-def _create_employee_wrapper(**kwargs) -> Dict[str, Any]:
+async def _create_employee_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for creating a new employee record with enhanced natural language processing"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     
     try:
         # If employee_name is provided, first search for the profile
         if kwargs.get('employee_name') and not kwargs.get('profile_id'):
             # Search for the profile first
-            search_result = search_profiles_by_name_tool(kwargs['employee_name'], db)
+            search_result = await search_profiles_by_name_tool(kwargs['employee_name'])
             if search_result.success and search_result.data.get('profiles'):
                 profiles = search_result.data['profiles']
                 if len(profiles) == 1:
@@ -398,7 +402,6 @@ def _create_employee_wrapper(**kwargs) -> Dict[str, Any]:
         # Handle hire date parsing from natural language
         if kwargs.get('hire_date') and not kwargs['hire_date'].count('-') == 2:
             # Try to parse natural language date like "15th Aug 2025"
-            import re
             date_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})', kwargs['hire_date'], re.IGNORECASE)
             if date_match:
                 day = date_match.group(1)
@@ -411,7 +414,7 @@ def _create_employee_wrapper(**kwargs) -> Dict[str, Any]:
                     kwargs['hire_date'] = f"{year}-{month_num}-{day.zfill(2)}"
         
         params = CreateEmployeeParams(**kwargs)
-        result = create_employee_tool(params, context, db)
+        result = await create_employee_tool(params, context)
         return result.model_dump()
         
     except Exception as e:
@@ -421,47 +424,50 @@ def _create_employee_wrapper(**kwargs) -> Dict[str, Any]:
             "data": None
         }
 
-def _update_employee_wrapper(**kwargs) -> Dict[str, Any]:
+async def _update_employee_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for updating an existing employee record"""
-    db = kwargs.pop('db', None)
+    # Remove db parameter (not needed with async sessions)
     context = kwargs.pop('context', None)
+    kwargs.pop('db', None)  # Remove but ignore
+    
     params = UpdateEmployeeParams(**kwargs)
-    result = update_employee_tool(params, context, db)
+    result = await update_employee_tool(params, context)
     return result.model_dump()
 
-def _search_employees_wrapper(**kwargs) -> Dict[str, Any]:
+async def _search_employees_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for searching employees by various criteria"""
-    db = kwargs.pop('db', None)
+    print(f"🔧 DEBUG: _search_employees_wrapper called with kwargs: {kwargs}")
+    kwargs.pop('db', None)
     search_term = kwargs.get("search_term")
     limit = kwargs.get("limit", 50)
-    result = search_employees_tool(search_term, limit, db)
+    print(f"🔧 DEBUG: Calling search_employees_tool with search_term='{search_term}', limit={limit}")
+    result = await search_employees_tool(search_term, limit)
+    print(f"🔧 DEBUG: search_employees_tool returned: {result}")
     return result.model_dump()
 
-
-
-def _get_employee_details_wrapper(**kwargs) -> Dict[str, Any]:
+async def _get_employee_details_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for getting detailed employee information"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     employee_id = kwargs.get("employee_id")
-    result = get_employee_details_tool(employee_id, db)
+    result = await get_employee_details_tool(employee_id)
     return result.model_dump()
 
-def _get_all_employees_wrapper(**kwargs) -> Dict[str, Any]:
+async def _get_all_employees_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for getting all employees in the system"""
-    db = kwargs.pop('db', None)
-    result = get_all_employees_tool(db)
+    kwargs.pop('db', None)
+    result = await get_all_employees_tool()
     return result.model_dump()
 
-def _search_profiles_by_name_wrapper(**kwargs) -> Dict[str, Any]:
+async def _search_profiles_by_name_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for searching user profiles by name"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     search_term = kwargs.get("search_term")
-    result = search_profiles_by_name_tool(search_term, db)
+    result = await search_profiles_by_name_tool(search_term)
     return result.model_dump()
 
-def _update_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
+async def _update_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for updating employee from natural language details - complete solution for employee updates"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     
     try:
@@ -475,7 +481,7 @@ def _update_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
             }
         
         # FIXED: First search for the profile by name to get profile_id
-        profile_search_result = search_profiles_by_name_tool(employee_name, db)
+        profile_search_result = await search_profiles_by_name_tool(employee_name)
         
         if not profile_search_result.success or not profile_search_result.data.get('profiles'):
             return {
@@ -496,82 +502,77 @@ def _update_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
         # Use the found profile to get the employee record
         profile_id = profiles[0]['profile_id']
         
-        # Now search for the employee using the profile_id
-        if db is None:
-            from src.database.core.database import get_db
-            db = next(get_db())
-        
-        from src.database.core.models import Employee
-        employee = db.query(Employee).filter(Employee.profile_id == profile_id).first()
-        
-        if not employee:
-            return {
-                "success": False,
-                "message": f"❌ No employee record found for '{employee_name}'. The profile exists but no employee record has been created."
+        async with get_ai_db() as session:
+            result = await session.execute(select(Employee).filter(Employee.profile_id == profile_id))
+            employee = result.scalar_one_or_none()
+            
+            if not employee:
+                return {
+                    "success": False,
+                    "message": f"❌ No employee record found for '{employee_name}'. The profile exists but no employee record has been created."
+                }
+            
+            # Use the found employee
+            employee_id = employee.employee_id
+            
+            # Handle hire date parsing from natural language
+            hire_date = kwargs.get('hire_date')
+            
+            if hire_date and not hire_date.count('-') == 2:
+                # Try to parse natural language date like "15th Aug 2025"
+                date_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})', hire_date, re.IGNORECASE)
+                if date_match:
+                    day = date_match.group(1)
+                    month = date_match.group(2)
+                    year = date_match.group(3)
+                    month_map = {"jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
+                                "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"}
+                    month_num = month_map.get(month.lower()[:3])
+                    if month_num:
+                        hire_date = f"{year}-{month_num}-{day.zfill(2)}"
+            
+            # Handle termination date parsing from natural language
+            termination_date = kwargs.get('termination_date')
+            
+            if termination_date and not termination_date.count('-') == 2:
+                # Try to parse natural language date
+                import re
+                date_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})', termination_date, re.IGNORECASE)
+                if date_match:
+                    day = date_match.group(1)
+                    month = date_match.group(2)
+                    year = date_match.group(3)
+                    month_map = {"jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
+                                "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"}
+                    month_num = month_map.get(month.lower()[:3])
+                    if month_num:
+                        termination_date = f"{year}-{month_num}-{day.zfill(2)}"
+            
+            # Update employee using the existing update_employee tool
+            employee_params_dict = {
+                'employee_id': employee_id,
+                'employee_number': kwargs.get('employee_number'),
+                'job_title': kwargs.get('job_title'),
+                'department': kwargs.get('department'),
+                'employment_type': kwargs.get('employment_type'),
+                'full_time_part_time': kwargs.get('full_time_part_time'),
+                'committed_hours': kwargs.get('committed_hours'),
+                'hire_date': hire_date,
+                'termination_date': termination_date,
+                'rate_type': kwargs.get('rate_type'),
+                'rate': kwargs.get('rate'),
+                'currency': kwargs.get('currency'),
+                'nda_file_link': kwargs.get('nda_file_link'),
+                'contract_file_link': kwargs.get('contract_file_link')
             }
-        
-        # Use the found employee
-        employee_id = employee.employee_id
-        
-        # Handle hire date parsing from natural language
-        hire_date = kwargs.get('hire_date')
-        
-        if hire_date and not hire_date.count('-') == 2:
-            # Try to parse natural language date like "15th Aug 2025"
-            import re
-            date_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})', hire_date, re.IGNORECASE)
-            if date_match:
-                day = date_match.group(1)
-                month = date_match.group(2)
-                year = date_match.group(3)
-                month_map = {"jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
-                             "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"}
-                month_num = month_map.get(month.lower()[:3])
-                if month_num:
-                    hire_date = f"{year}-{month_num}-{day.zfill(2)}"
-        
-        # Handle termination date parsing from natural language
-        termination_date = kwargs.get('termination_date')
-        
-        if termination_date and not termination_date.count('-') == 2:
-            # Try to parse natural language date
-            import re
-            date_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})', termination_date, re.IGNORECASE)
-            if date_match:
-                day = date_match.group(1)
-                month = date_match.group(2)
-                year = date_match.group(3)
-                month_map = {"jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
-                             "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"}
-                month_num = month_map.get(month.lower()[:3])
-                if month_num:
-                    termination_date = f"{year}-{month_num}-{day.zfill(2)}"
-        
-        # Update employee using the existing update_employee tool
-        employee_params_dict = {
-            'employee_id': employee_id,
-            'employee_number': kwargs.get('employee_number'),
-            'job_title': kwargs.get('job_title'),
-            'department': kwargs.get('department'),
-            'employment_type': kwargs.get('employment_type'),
-            'full_time_part_time': kwargs.get('full_time_part_time'),
-            'committed_hours': kwargs.get('committed_hours'),
-            'hire_date': hire_date,
-            'termination_date': termination_date,
-            'rate_type': kwargs.get('rate_type'),
-            'rate': kwargs.get('rate'),
-            'currency': kwargs.get('currency'),
-            'nda_file_link': kwargs.get('nda_file_link'),
-            'contract_file_link': kwargs.get('contract_file_link')
-        }
-        
-        # Remove None values to avoid updating fields that weren't specified
-        employee_params_dict = {k: v for k, v in employee_params_dict.items() if v is not None}
-        
-        employee_params = UpdateEmployeeParams(**employee_params_dict)
-        result = update_employee_tool(employee_params, context, db)
-        
-        return result.model_dump()
+            
+            # Remove None values to avoid updating fields that weren't specified
+            employee_params_dict = {k: v for k, v in employee_params_dict.items() if v is not None}
+            
+            employee_params = UpdateEmployeeParams(**employee_params_dict)
+            result = await update_employee_tool(employee_params, context)
+            
+            return result.model_dump()
         
     except Exception as e:
         return {
@@ -580,10 +581,12 @@ def _update_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
             "data": None
         }
 
-def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
+async def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
     """Enhanced wrapper for creating employee from natural language details - complete solution for employee creation"""
-    db = kwargs.pop('db', None)
+    print(f"🔧 DEBUG: _create_employee_from_details_wrapper called with kwargs: {list(kwargs.keys())}")
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
+    print(f"🔧 DEBUG: Context extracted: {context is not None}")
     
     try:
         # First search for the employee profile by name
@@ -596,7 +599,8 @@ def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
             }
         
         # Search for the profile
-        profile_search_result = search_profiles_by_name_tool(employee_name, db)
+        profile_search_result = await search_profiles_by_name_tool(employee_name)
+        print(f"🔧 DEBUG: Profile search result: success={profile_search_result.success}")
         
         if not profile_search_result.success or not profile_search_result.data.get('profiles'):
             return {
@@ -616,9 +620,9 @@ def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
         
         # Use the found profile
         profile_id = profiles[0]['profile_id']
+        print(f"🔧 DEBUG: Profile found, proceeding to create employee with profile_id: {profile_id}")
         
         # ENHANCED: Use the existing parse_employee_details_from_message function for better NLP
-        from src.aiagents.tools.employee_tools import parse_employee_details_from_message
         
         # Create a synthetic message from the provided parameters for parsing
         synthetic_message = f"Create employee {employee_name}"
@@ -646,10 +650,7 @@ def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
         # Enhanced hire date parsing from natural language
         hire_date = kwargs.get('hire_date')
         if hire_date and not (hire_date.count('-') == 2):
-            # Try multiple date parsing patterns
-            import re
-            from datetime import datetime
-            
+            # Try multiple date parsing pattern
             # Pattern 1: "15th Aug 2025", "1st January 2026"
             date_match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})', hire_date, re.IGNORECASE)
             if date_match:
@@ -736,7 +737,8 @@ def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
         employee_params_dict = {k: v for k, v in employee_params_dict.items() if v is not None}
         
         employee_params = CreateEmployeeParams(**employee_params_dict)
-        result = create_employee_tool(employee_params, context, db)
+        result = await create_employee_tool(employee_params, context)
+        print(f"🔧 DEBUG: create_employee_tool result: success={result.success}")
         
         return result.model_dump()
         
@@ -746,8 +748,6 @@ def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
             "message": f"❌ Failed to create employee from details: {str(e)}",
             "data": None
         }
-
-
 
 # --- Central Tool Registry ---
 TOOL_REGISTRY = {
@@ -784,19 +784,27 @@ TOOL_REGISTRY = {
     # Other tools will be registered here
 }
 
-def tool_executor_node(state: AgentState) -> Dict:
+async def tool_executor_node(state: AgentState) -> Dict:
     """
     Executes tools requested by an agent. This node is the central tool handler for the entire graph.
     It takes tool calls from the last message in the state, executes them, and returns the results.
     """
+    # 🚀 PERFORMANCE OPTIMIZATION: Track tool execution for contract search optimization
+    # TODO: Remove debug statements once performance is optimized
+    print(f"🔧 DEBUG: tool_executor_node called")
+    import asyncio
+    
     last_message = state['messages'][-1]
     tool_calls = getattr(last_message, 'tool_calls', [])
     
+    print(f"🔧 DEBUG: Found {len(tool_calls)} tool calls to execute")
+    
     if not tool_calls:
+        print(f"🔧 DEBUG: No tool calls found, returning empty messages")
         return {"messages": []}
 
     # The database session should be in the state's data payload, but context is in state.context
-    db_session = state.get('data', {}).get('database')
+    #db_session = state.get('data', {}).get('database')
     context = state.get('context', {})
 
     results = []
@@ -811,10 +819,26 @@ def tool_executor_node(state: AgentState) -> Dict:
                 args = json.loads(tool_call.function.arguments)
                 
                 # Add the database session and context to the arguments for the wrapper
-                args['db'] = db_session
+                #args['db'] = db_session
                 args['context'] = context
                 
-                output = tool_function(**args)
+                print(f"🔧 DEBUG: Executing tool '{tool_name}' with args: {args}")
+                print(f"🔧 DEBUG: Tool function type: {type(tool_function)}")
+                print(f"🔧 DEBUG: Is tool function async? {asyncio.iscoroutinefunction(tool_function)}")
+                
+                # 🔧 DEBUG: Special tracking for search_employees tool
+                if tool_name == 'search_employees':
+                    print(f"🔧 DEBUG: _search_employees_wrapper called with kwargs: {args}")
+                    search_term = args.get('search_term', 'N/A')
+                    print(f"🔧 DEBUG: Calling search_employees_tool with search_term='{search_term}', limit={args.get('limit', 50)}")
+                
+                output = await tool_function(**args)
+                print(f"🔧 DEBUG: Tool '{tool_name}' output: {output}")
+                
+                # 🔧 DEBUG: Special tracking for search_employees tool output
+                if tool_name == 'search_employees' and isinstance(output, dict):
+                    employees = output.get('data', {}).get('employees', [])
+                    print(f"🔧 DEBUG: search_employees_tool returned: success={output.get('success')} message=\"{output.get('message')}\" data={{'employees': {len(employees)} items, 'count': {output.get('data', {}).get('count', 0)}, 'search_term': '{output.get('data', {}).get('search_term', 'N/A')}'}}")
                 result_content = json.dumps(output)
 
             except Exception as e:

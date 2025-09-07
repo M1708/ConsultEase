@@ -614,9 +614,20 @@ class SearchContractsParams(BaseModel):
     status: Optional[str] = None
     billing_date_next_month: Optional[bool] = False
     billing_date_is_null: Optional[bool] = False
+    # TODO: If contract search becomes slow or unreliable, revert these new search parameters
+    billing_frequency: Optional[str] = None  # Monthly, Weekly, One-time
+    contract_type: Optional[str] = None  # Fixed, Hourly, Retainer
+    min_amount: Optional[float] = None  # Minimum contract amount
+    max_amount: Optional[float] = None  # Maximum contract amount
+    start_date_from: Optional[str] = None  # Filter contracts starting from this date (YYYY-MM-DD)
+    start_date_to: Optional[str] = None  # Filter contracts starting before this date (YYYY-MM-DD)
 
 def search_contracts_tool(params: SearchContractsParams, context: Dict[str, Any], db: Session = None) -> ContractToolResult:
     """Flexible tool for searching contracts by client, status, or billing date."""
+    # 🚀 PERFORMANCE OPTIMIZATION: Track contract search execution
+    # TODO: Remove debug statements once performance is optimized
+    print(f"🔧 DEBUG: search_contracts_tool called with params: {params.model_dump()}")
+    
     db_created = False
     if db is None:
         db = next(get_db())
@@ -624,6 +635,7 @@ def search_contracts_tool(params: SearchContractsParams, context: Dict[str, Any]
     try:
         query = db.query(Contract).join(Client)
         filters_applied = []
+        print(f"🔧 DEBUG: Starting contract search with base query")
 
         if params.client_name:
             query = query.filter(Client.client_name.ilike(f"%{params.client_name}%"))
@@ -651,13 +663,56 @@ def search_contracts_tool(params: SearchContractsParams, context: Dict[str, Any]
             query = query.filter(Contract.billing_prompt_next_date.is_(None))
             filters_applied.append("billing date is not set")
 
+        # TODO: If contract search becomes slow or unreliable, revert these new search parameter implementations
+        if params.billing_frequency:
+            query = query.filter(Contract.billing_frequency.ilike(f"%{params.billing_frequency}%"))
+            filters_applied.append(f"billing frequency is '{params.billing_frequency}'")
+
+        if params.contract_type:
+            query = query.filter(Contract.contract_type.ilike(f"%{params.contract_type}%"))
+            filters_applied.append(f"contract type is '{params.contract_type}'")
+
+        if params.min_amount is not None:
+            query = query.filter(Contract.original_amount >= params.min_amount)
+            filters_applied.append(f"amount >= ${params.min_amount:,.2f}")
+
+        if params.max_amount is not None:
+            query = query.filter(Contract.original_amount <= params.max_amount)
+            filters_applied.append(f"amount <= ${params.max_amount:,.2f}")
+
+        if params.start_date_from:
+            try:
+                from datetime import datetime
+                start_date = datetime.strptime(params.start_date_from, "%Y-%m-%d").date()
+                query = query.filter(Contract.start_date >= start_date)
+                filters_applied.append(f"start date >= {params.start_date_from}")
+            except ValueError:
+                # Invalid date format - skip this filter
+                pass
+
+        if params.start_date_to:
+            try:
+                from datetime import datetime
+                end_date = datetime.strptime(params.start_date_to, "%Y-%m-%d").date()
+                query = query.filter(Contract.start_date <= end_date)
+                filters_applied.append(f"start date <= {params.start_date_to}")
+            except ValueError:
+                # Invalid date format - skip this filter
+                pass
+
         contracts = query.order_by(Contract.created_at.desc()).all()
         
+        # TODO: If contract search becomes slow or unreliable, revert this enhanced contract list
         contract_list = [
             {
                 "contract_id": contract.contract_id,
                 "client_name": contract.client.client_name,
                 "status": contract.status,
+                "contract_type": contract.contract_type,
+                "billing_frequency": contract.billing_frequency,
+                "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                "start_date": str(contract.start_date) if contract.start_date else None,
+                "end_date": str(contract.end_date) if contract.end_date else None,
                 "billing_prompt_next_date": str(contract.billing_prompt_next_date) if contract.billing_prompt_next_date else 'Not set',
             } for contract in contracts
         ]
@@ -672,11 +727,18 @@ def search_contracts_tool(params: SearchContractsParams, context: Dict[str, Any]
             if null_billing_date_count > 0:
                 message += f" (Note: {null_billing_date_count} contracts have no billing prompt date set.)"
 
-        return ContractToolResult(
+        result = ContractToolResult(
             success=True,
             message=message,
             data={"contracts": contract_list, "count": len(contract_list)}
         )
+        
+        # 🚀 PERFORMANCE OPTIMIZATION: Track contract search completion
+        # TODO: Remove debug statements once performance is optimized
+        print(f"🔧 DEBUG: search_contracts_tool completed - found {len(contract_list)} contracts")
+        print(f"🔧 DEBUG: Returning result: {result.message}")
+        
+        return result
     except Exception as e:
         return ContractToolResult(success=False, message=f"❌ Failed to search contracts: {str(e)}")
     finally:

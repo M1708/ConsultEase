@@ -165,19 +165,25 @@ class EnhancedRoutingLogic:
         """
         message_lower = user_message.lower()
         
+        print(f"🔧 DEBUG: Enhanced routing - classifying: '{user_message}'")
+        
         # Step 1: Identify operation type
         operation_type = self._identify_operation_type(message_lower)
+        print(f"🔧 DEBUG: Enhanced routing - operation type: {operation_type}")
         
         # Step 2: Score each agent based on keyword matches
         agent_scores = self._calculate_agent_scores(user_message, message_lower)
+        print(f"🔧 DEBUG: Enhanced routing - base scores: {agent_scores}")
         
         # Step 3: Apply context-aware adjustments
         adjusted_scores = self._apply_context_adjustments(
             user_message, message_lower, agent_scores, operation_type
         )
+        print(f"🔧 DEBUG: Enhanced routing - adjusted scores: {adjusted_scores}")
         
         # Step 4: Determine the best agent
         best_agent, confidence = self._select_best_agent(adjusted_scores)
+        print(f"🔧 DEBUG: Enhanced routing - selected agent: {best_agent} (confidence: {confidence})")
         
         # Step 5: Generate reasoning
         reasoning = self._generate_reasoning(
@@ -246,13 +252,13 @@ class EnhancedRoutingLogic:
         if operation_type == "update" and any(word in message_lower for word in ["billing", "contract", "amount", "date"]):
             adjusted_scores["contract_agent"] += 3.0
         
-        # Adjustment 3: Person name context
+        # Adjustment 3: Person name context (Agentic approach - let agent reason about context)
         person_names = self._extract_person_names(original_message)
         if person_names:
-            # If we have employee-specific keywords with a person name, boost employee agent
+            # TODO: Make this more agentic - let the agent reason about person vs company context
+            # Instead of hard-coded rules, provide contextual hints for agent reasoning
             if any(keyword in message_lower for keyword in ["employee_number", "emp", "staff", "hire", "salary"]):
                 adjusted_scores["employee_agent"] += 4.0
-            # If we have client-specific keywords with a person name, boost client agent
             elif any(keyword in message_lower for keyword in ["client", "company", "contact", "business"]):
                 adjusted_scores["client_agent"] += 4.0
         

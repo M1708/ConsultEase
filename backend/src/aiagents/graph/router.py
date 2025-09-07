@@ -101,22 +101,24 @@ class IntelligentRouter:
             # Build system prompt with context
             system_prompt = f"""You are an intelligent routing system for a consulting management application.
 
-Your job is to analyze user requests and route them to the most appropriate specialized agent:
+Your job is to analyze user requests and route them to the most appropriate specialized agent based on the user's intent and context:
 
 - client_agent: Handles client management, company information, contact details, client creation/updates
-- contract_agent: Manages contracts, agreements, terms, renewals for EXISTING clients
-- employee_agent: Handles employee/contractor management, HR tasks, staff onboarding
+- contract_agent: Manages contracts, agreements, terms, renewals for EXISTING clients  
+- employee_agent: Handles employee/contractor management, HR tasks, staff onboarding, personnel information
 - deliverable_agent: Manages project deliverables, milestones, tasks, project tracking
 - time_agent: Handles time tracking, timesheets, hour logging, productivity management
 - user_agent: Manages user accounts, profiles, permissions, account settings
+
+Think about what type of information the user is seeking and which agent would be most capable of providing that information.
 
 Current context:
 {context}
 
 Agent Specializations:
-- client_agent: "create client", "search client", "update client", "client details", "company information"
+- client_agent: "create client", "search client", "update client", "client details", "company information", "client contact details"
 - contract_agent: "create contract", "contract details", "agreement", "contract terms", "billing"
-- employee_agent: "add employee", "staff management", "HR", "personnel", "hire", "employee details"
+- employee_agent: "add employee", "staff management", "HR", "personnel", "hire", "employee details", "staff details", "employee information", "show details for [person name]"
 - deliverable_agent: "project deliverable", "milestone", "task management", "project status"
 - time_agent: "log hours", "timesheet", "time entry", "track time", "productivity"
 - user_agent: "user account", "profile", "permissions", "manage users", "account settings"
@@ -126,6 +128,15 @@ Consider:
 2. Which agent specializes in the requested domain
 3. The user's role and permissions
 4. Previous conversation context
+
+ROUTING REASONING GUIDELINES:
+- When users ask for "details for [NAME]", consider the context:
+  * If the name appears to be a person (First Last format), think about whether they're asking for employee information
+  * If the name appears to be a company (Corp, Inc, LLC, etc.), think about whether they're asking for client information
+  * Consider the conversation context and what type of information would be most relevant
+
+- Use your reasoning to determine the most appropriate agent based on the user's likely intent
+- When in doubt, consider what type of information the user is most likely seeking
 
 If the request is a simple greeting, use handle_greeting.
 """
@@ -153,6 +164,9 @@ If the request is a simple greeting, use handle_greeting.
                 tool_call = message.tool_calls[0]
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
+                
+                print(f"🔧 DEBUG: Router decision - function: {function_name}, args: {function_args}")
+                print(f"🔧 DEBUG: Router reasoning: {message.content}")
                 
                 return {
                     "function": function_name,
@@ -215,7 +229,7 @@ If the request is a simple greeting, use handle_greeting.
         message_lower = user_message.lower()
         
         # Basic keyword matching
-        if any(word in message_lower for word in ["employee", "staff", "hire", "employee_number"]):
+        if any(word in message_lower for word in ["employee", "staff", "hire", "employee_number", "details for", "show details", "employee details"]):
             return {
                 "function": "route_to_agent",
                 "arguments": {
@@ -224,7 +238,7 @@ If the request is a simple greeting, use handle_greeting.
                     "confidence": "medium"
                 }
             }
-        elif any(word in message_lower for word in ["client", "company", "customer"]):
+        elif any(word in message_lower for word in ["client", "company", "customer", "client details", "client information"]):
             return {
                 "function": "route_to_agent",
                 "arguments": {

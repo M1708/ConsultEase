@@ -1,7 +1,9 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy import select, or_
+from src.database.core.database import get_ai_db
 
 from src.database.core.models import User, UserRole, UserStatus # Assuming Profile is the User model
 from src.database.core.schemas import UserCreate, UserUpdate, UserResponse # Assuming these are the user schemas
@@ -42,78 +44,99 @@ class DeleteUserParams(BaseModel):
 
 # --- Tool Functions ---
 
-def create_user_tool(params: CreateUserParams, db: Session) -> UserToolResult:
+async def create_user_tool(params: CreateUserParams) -> UserToolResult:
     try:
+        async with get_ai_db() as session:
         # Check if user with email already exists
-        existing_user = db.query(User).filter(User.email == params.email).first()
-        if existing_user:
-            return UserToolResult(success=False, message=f"User with email {params.email} already exists.")
+            result = await session.execute(select(User).filter(User.email == params.email))
+            existing_user = result.scalar_one_or_none()
+            #existing_user = db.query(User).filter(User.email == params.email).first()
+            if existing_user:
+                return UserToolResult(success=False, message=f"User with email {params.email} already exists.")
 
-        new_profile_data = params.model_dump(exclude_unset=True)
-        new_profile = User(**new_profile_data)
-        db.add(new_profile)
-        db.commit()
-        db.refresh(new_profile)
-        return UserToolResult(success=True, message="User created successfully.", data=ProfileResponse.model_validate(new_profile).model_dump())
+            new_profile_data = params.model_dump(exclude_unset=True)
+            new_profile = User(**new_profile_data)
+            await session.add(new_profile)
+            await session.commit()
+            await session.refresh(new_profile)
+            return UserToolResult(success=True, message="User created successfully.", data=ProfileResponse.model_validate(new_profile).model_dump())
     except Exception as e:
-        db.rollback()
+        await session.rollback()
         return UserToolResult(success=False, message=f"Error creating user: {e}")
 
-def get_user_details_tool(params: GetUserDetailsParams, db: Session) -> UserToolResult:
+async def get_user_details_tool(params: GetUserDetailsParams) -> UserToolResult:
     try:
-        user = db.query(User).filter(User.profile_id == params.profile_id).first()
-        if not user:
-            return UserToolResult(success=False, message="User not found.")
-        return UserToolResult(success=True, message="User details retrieved successfully.", data=ProfileResponse.model_validate(user).model_dump())
+        async with get_ai_db() as session:
+            result = await session.execute(select(User).filter(User.profile_id == params.profile_id))
+            user = result.scalar_one_or_none()
+            #user = db.query(User).filter(User.profile_id == params.profile_id).first()
+            if not user:
+                return UserToolResult(success=False, message="User not found.")
+            return UserToolResult(success=True, message="User details retrieved successfully.", data=ProfileResponse.model_validate(user).model_dump())
     except Exception as e:
         return UserToolResult(success=False, message=f"Error retrieving user details: {e}")
 
-def update_user_tool(params: UpdateUserParams, db: Session) -> UserToolResult:
+async def update_user_tool(params: UpdateUserParams) -> UserToolResult:
     try:
-        user = db.query(User).filter(User.profile_id == params.profile_id).first()
-        if not user:
-            return UserToolResult(success=False, message="User not found.")
+        async with get_ai_db() as session:
+            result = await session.execute(select(User).filter(User.profile_id == params.profile_id))
+            user = result.scalar_one_or_none()
+            #user = db.query(User).filter(User.profile_id == params.profile_id).first()
+            if not user:
+                return UserToolResult(success=False, message="User not found.")
 
-        update_data = params.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(user, key, value)
-        
-        db.commit()
-        db.refresh(user)
-        return UserToolResult(success=True, message="User updated successfully.", data=ProfileResponse.model_validate(user).model_dump())
+            update_data = params.model_dump(exclude_unset=True)
+            for key, value in update_data.items():
+                setattr(user, key, value)
+            
+            await session.commit()
+            await session.refresh(user)
+            return UserToolResult(success=True, message="User updated successfully.", data=ProfileResponse.model_validate(user).model_dump())
     except Exception as e:
-        db.rollback()
+        await session.rollback()
         return UserToolResult(success=False, message=f"Error updating user: {e}")
 
-def delete_user_tool(params: DeleteUserParams, db: Session) -> UserToolResult:
+async def delete_user_tool(params: DeleteUserParams) -> UserToolResult:
     try:
-        user = db.query(User).filter(User.profile_id == params.profile_id).first()
-        if not user:
-            return UserToolResult(success=False, message="User not found.")
-        
-        db.delete(user)
-        db.commit()
-        return UserToolResult(success=True, message="User deleted successfully.")
+        async with get_ai_db() as session:
+            result = await session.execute(select(User).filter(User.profile_id == params.profile_id))
+            user = result.scalar_one_or_none()
+            #user = db.query(User).filter(User.profile_id == params.profile_id).first()
+            if not user:
+                return UserToolResult(success=False, message="User not found.")
+            
+            await session.delete(user)
+            await session.commit()
+            #db.commit()
+            return UserToolResult(success=True, message="User deleted successfully.")
     except Exception as e:
-        db.rollback()
+        await session.rollback()
         return UserToolResult(success=False, message=f"Error deleting user: {e}")
 
-def search_users_tool(params: SearchUsersParams, db: Session) -> UserToolResult:
+async def search_users_tool(params: SearchUsersParams) -> UserToolResult:
     try:
-        query = db.query(User)
-        if params.query:
-            search_term = f"%{params.query.lower()}%"
-            query = query.filter(
-                (User.email.ilike(search_term)) |
-                (User.first_name.ilike(search_term)) |
-                (User.last_name.ilike(search_term))
-            )
-        if params.role:
-            query = query.filter(User.role == params.role)
-        if params.status:
-            query = query.filter(User.status == params.status)
-        
-        users = query.limit(params.limit).all()
-        return UserToolResult(success=True, message="Users retrieved successfully.", data=[ProfileResponse.model_validate(user).model_dump() for user in users])
+        async with get_ai_db() as session:
+            query = select(User)
+            if params.query:
+                search_term = f"%{params.query.lower()}%"
+                query = query.filter(
+                    or_(
+                        User.email.ilike(search_term),
+                        User.first_name.ilike(search_term),
+                        User.last_name.ilike(search_term)
+                    )
+                )
+            if params.role:
+                query = query.filter(User.role == params.role)
+            if params.status:
+                query = query.filter(User.status == params.status)
+
+            result = await session.execute(query.limit(params.limit))
+            users = result.scalars().all()
+            return UserToolResult(
+                success=True, 
+                message="Users retrieved successfully.", 
+                data=[ProfileResponse.model_validate(user).model_dump() for user in users])
+
     except Exception as e:
         return UserToolResult(success=False, message=f"Error searching users: {e}")

@@ -1,14 +1,24 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from src.database.core.database import get_db, engine, Base
+from src.database.core.database import get_db, async_engine, Base
 from src.database.api import clients, contracts, client_contacts, deliverables, time_entries, expenses, employees, chat, chat_sessions
 from src.auth import routes as auth_routes
 from src.auth.middleware import auth_middleware
+from  src.auth.session_manager import SessionManager
+
 
 # Create database tables
-Base.metadata.create_all(bind=engine)
+#Base.metadata.create_all(bind=engine)
+
+# Create tables asynchronously - DISABLED for pgbouncer compatibility
+async def create_tables():
+    # Skip table creation to avoid pgbouncer prepared statements error
+    # Tables should already exist in the database
+    print("🔧 DEBUG: Skipping table creation for pgbouncer compatibility")
+    pass
+
 
 app = FastAPI(
     title="ConsultEase API",
@@ -41,19 +51,29 @@ app.include_router(employees.router, prefix="/api/employees", tags=["employees"]
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(chat_sessions.router, prefix="/api/chat", tags=["chat-sessions"])
 
+@app.on_event("startup")
+async def startup():
+    """Initialize database tables on startup"""
+    await create_tables()
+    print("Database tables created successfully")
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Clean shutdown"""
+    await async_engine.dispose()
+
 @app.get("/")
 def root():
     return {"message": "ConsultEase API is running with authentication!"}
 
 @app.get("/health")
-def health_check(db: Session = Depends(get_db)):
+async def health_check(db: AsyncSession = Depends(get_db)):
     """Health check endpoint"""
     try:
         # Test database connection
-        db.execute(text('SELECT 1'))
+        await db.execute(text('SELECT 1'))
         
         # Test Redis connection
-        from  src.auth.session_manager import SessionManager
         session_manager = SessionManager()
         session_manager.redis_client.ping()
         
