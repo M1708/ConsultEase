@@ -23,8 +23,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # PGBOUNCER DETECTION: Check if using connection pooler
 IS_PGBOUNCER = "pooler.supabase.com" in (DATABASE_URL or "") or "pooler" in (DATABASE_URL or "").lower()
-print(f"🔧 DEBUG: PGBOUNCER detected: {IS_PGBOUNCER}")
-print(f"🔧 DEBUG: Database URL: {DATABASE_URL[:50]}..." if DATABASE_URL else "No DATABASE_URL")
 
 # Convert PostgreSQL URL to async format
 if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
@@ -36,12 +34,10 @@ else:
 
 # FORCE PGBOUNCER COMPATIBILITY: Always use pgbouncer settings for Supabase
 if IS_PGBOUNCER or "supabase.com" in (DATABASE_URL or ""):
-    print("🔧 DEBUG: Forcing pgbouncer compatibility mode")
     IS_PGBOUNCER = True
 
 # CRITICAL: Force pgbouncer compatibility for ALL Supabase connections
 if DATABASE_URL and ("supabase.com" in DATABASE_URL or "pooler" in DATABASE_URL.lower()):
-    print("🔧 DEBUG: CRITICAL - Forcing pgbouncer compatibility for Supabase")
     IS_PGBOUNCER = True
 
 # 🚀 ASYNC ENGINE: PGBOUNCER COMPATIBLE - Maximum performance for AgenticAI
@@ -117,10 +113,8 @@ async def test_async_connection():
             from sqlalchemy import text
             result = await session.execute(text("SELECT 1 as test"))
             test_value = result.scalar()
-            print(f"🔧 DEBUG: Async connection test successful: {test_value}")
             return True
     except Exception as e:
-        print(f"🔧 DEBUG: Async connection test failed: {str(e)}")
         return False
 
 Base = declarative_base()

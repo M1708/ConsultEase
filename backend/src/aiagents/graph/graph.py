@@ -115,28 +115,8 @@ def after_agent_execution(state: AgentState) -> str:
 def after_tool_execution(state: AgentState) -> str:
     """Decides whether to continue with the agent or end the conversation."""
     # 🚀 PERFORMANCE OPTIMIZATION: Track execution flow for contract search optimization
-    # TODO: Remove debug statements once performance is optimized
-    print(f"🔧 DEBUG: after_tool_execution called with {len(state['messages'])} messages")
-    
-    # 🚀 OPTIMIZATION: Early termination for successful tool results to prevent loops
-    # TODO: If agents stop processing tool results properly, revert this optimization
-    if len(state['messages']) > 0:
-        last_message = state['messages'][-1]
-        print(f"🔧 DEBUG: Last message type: {type(last_message)}")
-        print(f"🔧 DEBUG: Last message role: {getattr(last_message, 'role', 'no role')}")
-        
-        # 🔧 FIX: Always let agent format tool results - remove early termination optimization
-        # TODO: This ensures agent can format all tool results properly instead of returning raw JSON
-        if isinstance(last_message, dict) and "content" in last_message:
-            print(f"🔧 DEBUG: Last message is dict with content - letting agent format")
-        elif hasattr(last_message, 'content') and last_message.content:
-            print(f"🔧 DEBUG: Last message content preview: {str(last_message.content)[:200]}... - letting agent format")
-        else:
-            print(f"🔧 DEBUG: Last message has no content or content is empty")
-    
     # CRITICAL FIX: After tool execution, always return to the current agent
     # so it can process and format the tool results
-    print(f"🔧 DEBUG: Returning to agent: {state['current_agent']}")
     return state["current_agent"]
 
 # After any agent runs, we check if we need to run tools

@@ -16,7 +16,6 @@ from  src.auth.session_manager import SessionManager
 async def create_tables():
     # Skip table creation to avoid pgbouncer prepared statements error
     # Tables should already exist in the database
-    print("🔧 DEBUG: Skipping table creation for pgbouncer compatibility")
     pass
 
 

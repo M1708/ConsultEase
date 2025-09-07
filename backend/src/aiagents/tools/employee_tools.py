@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy import select, or_, and_, func
+from sqlalchemy.exc import IntegrityError
 import re
 import calendar
 from datetime import datetime, date, timedelta
@@ -40,6 +41,8 @@ class CreateEmployeeParams(BaseModel):
 
 class UpdateEmployeeParams(BaseModel):
     employee_id: Optional[int] = None
+    profile_id: Optional[str] = None  # TODO: OPTIMIZATION - Support profile_id to eliminate nested sessions
+    employee_name: Optional[str] = None  # TODO: OPTIMIZATION - Support employee_name for inline profile search
     employee_number: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
@@ -330,7 +333,6 @@ def parse_employee_details_from_message(message: str) -> Dict[str, Any]:
 
 async def search_profiles_by_name_tool(search_name: str) -> EmployeeToolResult:
     """Tool for searching user profiles by name to find profile_id for employee creation"""
-    print(f"🔧 DEBUG: search_profiles_by_name_tool called with: {search_name}")
     try:
         async with get_ai_db() as session:
             # Clean and extract the actual name from the search string
@@ -407,13 +409,6 @@ async def search_profiles_by_name_tool(search_name: str) -> EmployeeToolResult:
                 
                 result = await session.execute(select(User).filter(or_(*conditions)))
                 profiles = result.scalars().all()
-            ###TODO: Remove this
-            if profiles:
-                print(f"🔧 DEBUG: Found {len(profiles)} profiles for '{search_name}'")
-                for profile in profiles:
-                    print(f"🔧 DEBUG: Profile found - ID: {profile.user_id}, Name: {profile.first_name} {profile.last_name}")
-            else:
-                print(f"🔧 DEBUG: No profiles found for '{search_name}'")
 
             # Optional: Add result ranking/sorting for better matches
             # profiles = sorted(profiles, key=lambda p: name_match_score(p, cleaned_name), reverse=True)
@@ -456,8 +451,6 @@ async def search_profiles_by_name_tool(search_name: str) -> EmployeeToolResult:
 async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, Any] = None) -> EmployeeToolResult:
     """Tool for creating a new employee record"""
 
-    print(f"🔧 DEBUG: create_employee_tool called with params: {params}")
-    print(f"🔧 DEBUG: Context available: {context is not None}")
     
     try:
         # Always create a fresh database session to avoid session closure issues
@@ -474,26 +467,53 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
         
             resolved_profile_id = params.profile_id
             
-            # If employee_name is provided but no profile_id, search for the profile
-            if params.employee_name and not params.profile_id:
-                profile_search_result = search_profiles_by_name_tool(params.employee_name)
-                if not profile_search_result.success or not profile_search_result.data.get('profiles'):
+            # TODO: OPTIMIZATION - Efficient profile search with indexed fields only
+            # If employee_name is provided but no profile_id, search for the profile inline
+            if params.employee_name and params.profile_id is None:
+                # TODO: OPTIMIZATION - Use efficient search strategy
+                # Search for profiles inline to avoid nested database sessions
+                cleaned_name = params.employee_name.strip()
+                
+                # TODO: OPTIMIZATION - Prioritize indexed fields for better performance
+                # Use email first (likely indexed), then name fields
+                # Avoid expensive func.concat operations and multiple ilike conditions
+                conditions = [
+                    User.email.ilike(f"%{cleaned_name}%"),  # Email search (likely indexed)
+                    User.first_name.ilike(f"%{cleaned_name}%"),  # First name search
+                    User.last_name.ilike(f"%{cleaned_name}%")  # Last name search
+                ]
+                
+                # TODO: OPTIMIZATION - Add full name search only if needed
+                # Use simpler approach than func.concat for better performance
+                if ' ' in cleaned_name:
+                    # Split name and search for both parts
+                    name_parts = cleaned_name.split()
+                    if len(name_parts) >= 2:
+                        conditions.extend([
+                            User.first_name.ilike(f"%{name_parts[0]}%"),
+                            User.last_name.ilike(f"%{name_parts[-1]}%")
+                        ])
+                
+                # Execute profile search in the same session
+                result = await session.execute(select(User).filter(or_(*conditions)))
+                profiles = result.scalars().all()
+                
+                if not profiles:
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ No user profile found for '{params.employee_name}'. Please create a user profile first before creating an employee record."
                     )
                 
-                profiles = profile_search_result.data['profiles']
                 if len(profiles) > 1:
                     # Multiple profiles found - ask for clarification
-                    profile_names = [f"{p['first_name']} {p['last_name']} ({p['email']})" for p in profiles]
+                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ Multiple profiles found for '{params.employee_name}': {', '.join(profile_names)}. Please specify which profile to use."
                     )
                 
                 # Use the found profile
-                resolved_profile_id = profiles[0]['profile_id']
+                resolved_profile_id = profiles[0].user_id
             
             # Check if profile exists - use the resolved profile_id
             if not resolved_profile_id:
@@ -504,12 +524,10 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
             
             check_profile = await session.execute(select(User).filter(User.user_id == resolved_profile_id))
             profile_exists = check_profile.scalar_one_or_none()
-            #profile_exists = db.query(User).filter(User.user_id == resolved_profile_id).first()
-            #profile_exists = db.query(User).filter(User.user_id == resolved_profile_id).first()
             if not profile_exists:
                 return EmployeeToolResult(
                     success=False,
-                        message=f"❌ Profile with ID '{resolved_profile_id}' not found."
+                    message=f"❌ Profile with ID '{resolved_profile_id}' not found."
                 )
         
             # Check if employee record already exists for this profile
@@ -525,9 +543,8 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
         
             # Check if employee number already exists
             if params.employee_number:
-                    check_emp = await session.execute(select(Employee).filter(Employee.employee_number == params.employee_number))
-                    existing_employee = check_emp.scalar_one_or_none()
-                    #existing_employee = db.query(Employee).filter(Employee.employee_number == params.employee_number).first()
+                check_emp = await session.execute(select(Employee).filter(Employee.employee_number == params.employee_number))
+                existing_employee = check_emp.scalar_one_or_none()
             if existing_employee:
                 return EmployeeToolResult(
                     success=False,
@@ -569,9 +586,8 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                 final_rate = params.salary
                 final_rate_type = "salary"
             
-            # Get the employee name for the record
-            employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
-                
+            # TODO: OPTIMIZATION - Employee name will be handled in the success response
+            # We'll use the profile data from the search above
             db_employee = Employee(
                     profile_id=resolved_profile_id,
                 employee_number=params.employee_number,
@@ -591,15 +607,37 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                 updated_by=user_id
             )
             
-            session.add(db_employee)
-            await session.commit()
-            await session.refresh(db_employee)
-            
+            # TODO: OPTIMIZATION - Handle database constraints efficiently
+            # Let database handle duplicate checks and other constraints
+            try:
+                session.add(db_employee)
+                await session.commit()
+                await session.refresh(db_employee)
                 
-            # Get the employee name from the profile for the success message
-            employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
+                # Get the employee name from the profile for the success message
+                employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
                 
-            print(f"🔧 DEBUG: Employee created successfully with ID: {db_employee.employee_id}")
+            except IntegrityError as e:
+                # TODO: OPTIMIZATION - Handle database constraint violations efficiently
+                # Database handles duplicate checks, we just need to parse the error message
+                await session.rollback()
+                error_message = str(e).lower()
+                if "employee_number" in error_message or "duplicate" in error_message:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Employee number '{params.employee_number}' already exists."
+                    )
+                elif "profile_id" in error_message:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Employee record already exists for this profile."
+                    )
+                else:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Database constraint violation: {str(e)}"
+                    )
+                
 
             return EmployeeToolResult(
                 success=True,
@@ -620,7 +658,6 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
             )
         
     except Exception as e:
-        print(f"🔧 DEBUG: Error in create_employee_tool: {str(e)}")
         # Ensure session is closed on error
         
         return EmployeeToolResult(
@@ -643,32 +680,85 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
         
             user_id = context['user_id']
             
-            # Find employee by ID
-            if not params.employee_id:
-                return EmployeeToolResult(
-                    success=False,
-                    message="❌ Employee ID is required for updates."
-                )
-            
-            check_employee = await session.execute(select(Employee).filter(Employee.employee_id == params.employee_id))
-            employee = check_employee.scalar_one_or_none()
-                #employee = db.query(Employee).filter(Employee.employee_id == params.employee_id).first()
-            if not employee:
-                return EmployeeToolResult(
-                    success=False,
-                    message=f"❌ Employee with ID {params.employee_id} not found."
-                )
-            
-            # Check if employee number already exists (if being updated)
-            if params.employee_number and params.employee_number != employee.employee_number:
-                    check_emp = await session.execute(select(Employee).filter(Employee.employee_number == params.employee_number))
-                    existing_employee = check_emp.scalar_one_or_none()
-                    #existing_employee = db.query(Employee).filter(Employee.employee_number == params.employee_number).first()
-                    if existing_employee:
-                        return EmployeeToolResult(
-                            success=False,
-                            message=f"❌ Employee number '{params.employee_number}' already exists."
+            # TODO: OPTIMIZATION - Support employee_id, profile_id, or employee_name to eliminate nested sessions
+            # Find employee by ID, profile_id, or employee_name (with inline profile search)
+            if params.employee_id:
+                check_employee = await session.execute(select(Employee).filter(Employee.employee_id == params.employee_id))
+                employee = check_employee.scalar_one_or_none()
+                if not employee:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Employee with ID {params.employee_id} not found."
                     )
+            elif params.profile_id:
+                check_employee = await session.execute(select(Employee).filter(Employee.profile_id == params.profile_id))
+                employee = check_employee.scalar_one_or_none()
+                if not employee:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee record found for profile ID {params.profile_id}. The profile exists but no employee record has been created."
+                    )
+            elif params.employee_name:
+                # TODO: OPTIMIZATION - Efficient profile search with indexed fields only
+                # Search for profiles inline to avoid nested database sessions
+                cleaned_name = params.employee_name.strip()
+                
+                # TODO: OPTIMIZATION - Prioritize indexed fields for better performance
+                # Use email first (likely indexed), then name fields
+                # Avoid expensive func.concat operations and multiple ilike conditions
+                conditions = [
+                    User.email.ilike(f"%{cleaned_name}%"),  # Email search (likely indexed)
+                    User.first_name.ilike(f"%{cleaned_name}%"),  # First name search
+                    User.last_name.ilike(f"%{cleaned_name}%")  # Last name search
+                ]
+                
+                # TODO: OPTIMIZATION - Add full name search only if needed
+                # Use simpler approach than func.concat for better performance
+                if ' ' in cleaned_name:
+                    # Split name and search for both parts
+                    name_parts = cleaned_name.split()
+                    if len(name_parts) >= 2:
+                        conditions.extend([
+                            User.first_name.ilike(f"%{name_parts[0]}%"),
+                            User.last_name.ilike(f"%{name_parts[-1]}%")
+                        ])
+                
+                # Execute profile search in the same session
+                result = await session.execute(select(User).filter(or_(*conditions)))
+                profiles = result.scalars().all()
+                
+                if not profiles:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No user profile found for '{params.employee_name}'. Please check the name and try again."
+                    )
+                
+                if len(profiles) > 1:
+                    # Multiple profiles found - ask for clarification
+                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Multiple profiles found for '{params.employee_name}': {', '.join(profile_names)}. Please be more specific."
+                    )
+                
+                # Use the found profile to get the employee record
+                profile_id = str(profiles[0].user_id)
+                check_employee = await session.execute(select(Employee).filter(Employee.profile_id == profile_id))
+                employee = check_employee.scalar_one_or_none()
+                if not employee:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee record found for '{params.employee_name}'. The profile exists but no employee record has been created."
+                    )
+            else:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Either employee_id, profile_id, or employee_name is required for updates."
+                )
+            
+            # TODO: OPTIMIZATION - Let database handle duplicate check via constraints
+            # This eliminates an extra database query and improves performance
+            # The database will raise IntegrityError if employee_number already exists
             
             # Update fields
             update_fields = []
@@ -754,19 +844,23 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
             employee.updated_by = user_id
             employee.updated_at = datetime.utcnow()
             
-            # Commit changes
-            await session.commit()
-            await session.refresh(employee)
-            
-            # Close the database session
-            
-            # Get profile information for comprehensive response
-            check_profile = await session.execute(select(User).filter(User.user_id == employee.profile_id))
-            profile = check_profile.scalar_one_or_none()
-            
-            return EmployeeToolResult(
-                success=True,
-                message=f"✅ Successfully updated employee {profile.first_name} {profile.last_name}. Updated fields: {', '.join(update_fields)}. Please present the employee information in a user-friendly format, showing only non-null fields in a clear, organized manner." if profile else f"✅ Successfully updated employee. Updated fields: {', '.join(update_fields)}. Please present the employee information in a user-friendly format, showing only non-null fields in a clear, organized manner.",
+            # TODO: OPTIMIZATION - Handle database constraints and eliminate redundant lookup
+            # Let database handle duplicate checks and use existing data for response
+            try:
+                # Commit changes - database will raise IntegrityError if constraints violated
+                await session.commit()
+                await session.refresh(employee)
+                
+                # TODO: OPTIMIZATION - Minimal profile lookup for name only
+                # We only need the name for formatting, not all profile data
+                # This is a minimal query compared to the previous full profile lookup
+                check_profile = await session.execute(select(User.first_name, User.last_name).filter(User.user_id == employee.profile_id))
+                profile_name = check_profile.first()
+                
+                # Return success response using existing employee data
+                return EmployeeToolResult(
+                    success=True,
+                    message=f"✅ Successfully updated employee. Updated fields: {', '.join(update_fields)}. Please present the employee information in a user-friendly format, showing only non-null fields in a clear, organized manner.",
                 data={
                     "updated_fields": update_fields,
                     "employee": {
@@ -788,19 +882,32 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
                         "created_at": str(employee.created_at) if employee.created_at else None,
                         "updated_at": str(employee.updated_at) if employee.updated_at else None
                     },
+                    # TODO: OPTIMIZATION - Minimal profile data for formatting only
+                    # We only include the name needed for response formatting
                     "profile": {
-                        "first_name": profile.first_name if profile else None,
-                        "last_name": profile.last_name if profile else None,
-                        "email": profile.email if profile else None,
-                        "full_name": f"{profile.first_name} {profile.last_name}".strip() if profile and profile.first_name and profile.last_name else "Unknown"
-                    } if profile else {
-                        "first_name": None,
-                        "last_name": None,
-                        "email": None,
-                        "full_name": "Unknown"
+                        "profile_id": str(employee.profile_id),
+                        "first_name": profile_name.first_name if profile_name else None,
+                        "last_name": profile_name.last_name if profile_name else None,
+                        "full_name": f"{profile_name.first_name} {profile_name.last_name}".strip() if profile_name and profile_name.first_name and profile_name.last_name else "Employee"
                     }
                 }
             )
+                
+            except IntegrityError as e:
+                # TODO: OPTIMIZATION - Handle database constraint violations efficiently
+                # Database handles duplicate checks, we just need to parse the error message
+                await session.rollback()
+                error_message = str(e).lower()
+                if "employee_number" in error_message or "duplicate" in error_message:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Employee number '{params.employee_number}' already exists."
+                    )
+                else:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Database constraint violation: {str(e)}"
+                    )
             
     except Exception as e:
         
@@ -813,24 +920,18 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
     """Tool for searching employees by name, job title, department, or employee number"""
 
     try:
-        # 🔧 DEBUG: Track search input parameters
-        print(f"🔧 DEBUG: ===== SEARCH_EMPLOYEES_TOOL CALLED =====")
-        print(f"🔧 DEBUG: search_employees_tool called with search_term='{search_term}', limit={limit}")
-        print(f"🔧 DEBUG: Search term type: {type(search_term)}, length: {len(search_term) if search_term else 0}")
         
         async with get_ai_db() as session:
-            # 🔧 DEBUG: Check if this is a person name lookup (First Last format)
+            # Check if this is a person name lookup (First Last format)
             import re
             person_name_pattern = r'^[A-Z][a-z]+\s+[A-Z][a-z]+$'
             is_person_name = re.match(person_name_pattern, search_term.strip())
             
             if is_person_name:
-                print(f"🔧 DEBUG: Detected person name pattern: '{search_term}'")
                 # Split the name
                 name_parts = search_term.strip().split()
                 first_name = name_parts[0]
                 last_name = name_parts[1]
-                print(f"🔧 DEBUG: Looking up profile for first_name='{first_name}', last_name='{last_name}'")
                 
                 # Look up the profile first
                 profile_query = select(User).filter(
@@ -841,14 +942,12 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                 profile = profile_result.scalar_one_or_none()
                 
                 if profile:
-                    print(f"🔧 DEBUG: Found profile: {profile.user_id} - {profile.first_name} {profile.last_name}")
                     # Now search for employee with this specific profile_id
                     employee_query = select(Employee).filter(Employee.profile_id == profile.user_id)
                     employee_result = await session.execute(employee_query)
                     employee = employee_result.scalar_one_or_none()
                     
                     if employee:
-                        print(f"🔧 DEBUG: Found employee record for {profile.first_name} {profile.last_name}")
                         # Build the employee data
                         employee_list = [{
                             "employee_id": employee.employee_id,
@@ -881,7 +980,6 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                             }
                         )
                     else:
-                        print(f"🔧 DEBUG: No employee record found for profile {profile.user_id}")
                         return EmployeeToolResult(
                             success=True,
                             message=f"📋 Found profile for '{search_term}' but no employee record exists.",
@@ -892,42 +990,28 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                             }
                         )
                 else:
-                    print(f"🔧 DEBUG: No profile found for '{search_term}'")
                     # Fall through to regular search
-            # 🔧 DEBUG: Check what employees exist in the database
-            all_employees = await session.execute(select(Employee))
-            all_emp_list = all_employees.scalars().all()
-            print(f"🔧 DEBUG: Total employees in database: {len(all_emp_list)}")
-            for emp in all_emp_list:
-                print(f"🔧 DEBUG: Employee {emp.employee_id}: profile_id={emp.profile_id}")
-            
-            # 🔧 DEBUG: Check what profiles exist
-            all_profiles = await session.execute(select(User))
-            all_prof_list = all_profiles.scalars().all()
-            print(f"🔧 DEBUG: Total profiles in database: {len(all_prof_list)}")
-            for prof in all_prof_list:
-                print(f"🔧 DEBUG: Profile {prof.user_id}: {prof.first_name} {prof.last_name}")
+                    pass
             
             # Search across multiple fields
-            base_query = select(Employee).join(User, Employee.profile_id == User.user_id)
 
-            # Handle inconsistent database values for part-time/full-time
-            search_term_variations = [search_term]
-            if search_term.lower() == "part-time":
+        # Handle inconsistent database values for part-time/full-time
+        search_term_variations = [search_term]
+        if search_term.lower() == "part-time":
                 search_term_variations.extend(["part_time", "part time"])
-            elif search_term.lower() == "full-time":
+        elif search_term.lower() == "full-time":
                 search_term_variations.extend(["full_time", "full time"])
-            elif search_term.lower() == "part_time":
+        elif search_term.lower() == "part_time":
                 search_term_variations.extend(["part-time", "part time"])
-            elif search_term.lower() == "full_time":
+        elif search_term.lower() == "full_time":
                 search_term_variations.extend(["full-time", "full time"])
-            
-            # Build search filter with variations
-            # TODO: If employee queries become incomplete, revert this rate_type field addition
-            search_conditions = []
-            
-            # Handle date-based searches
-            if search_term.startswith("start_date:"):
+        
+        # Build search filter with variations
+        # TODO: If employee queries become incomplete, revert this rate_type field addition
+        search_conditions = []
+        
+        # Handle date-based searches
+        if search_term.startswith("start_date:"):
                 # TODO: If employee queries become incomplete, revert this date search addition
                 date_str = search_term.replace("start_date:", "").strip()
                 try:
@@ -967,7 +1051,7 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                     print(f"Date parsing error: {e}")
                     # Fallback to text search
                     search_filter = Employee.hire_date.ilike(f"%{date_str}%")
-            elif search_term.startswith("start_relative:"):
+        elif search_term.startswith("start_relative:"):
                 # TODO: If employee queries become incomplete, revert this relative date search addition
                 relative_str = search_term.replace("start_relative:", "").strip()
                 try:
@@ -981,11 +1065,9 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                     print(f"Relative date parsing error: {e}")
                     # Fallback to text search
                     search_filter = Employee.hire_date.ilike(f"%{relative_str}%")
-            else:
+        else:
                 # Regular text-based search
-                print(f"🔧 DEBUG: Building search conditions for term variations: {search_term_variations}")
                 for term in search_term_variations:
-                    print(f"🔧 DEBUG: Adding search conditions for term: '{term}'")
                     search_conditions.extend([
                         User.first_name.ilike(f"%{term}%"),
                         User.last_name.ilike(f"%{term}%"),
@@ -996,24 +1078,18 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                         Employee.full_time_part_time.ilike(f"%{term}%"),
                         Employee.rate_type.ilike(f"%{term}%")  # 🚀 FIX: Add rate_type search for hourly/salary queries
                     ])
-                print(f"🔧 DEBUG: Total search conditions built: {len(search_conditions)}")
                 
                 search_filter = or_(*search_conditions)
     
-            # Step 1: Get employees with their profiles in a single query with filters
-            print(f"🔧 DEBUG: Executing JOIN query with search_filter: {search_filter}")
-            final_join_query = select(Employee, User).join(User, Employee.profile_id == User.user_id, isouter=True).filter(search_filter).limit(limit)
-            print(f"🔧 DEBUG: Final JOIN query: {final_join_query}")
-            employees_with_profiles = await session.execute(final_join_query)
-            # Convert to list to get actual count
-            employees_list = list(employees_with_profiles)
-            print(f"🔧 DEBUG: JOIN query results count: {len(employees_list)}")
+        # Step 1: Get employees with their profiles in a single query with filters
+        final_join_query = select(Employee, User).join(User, Employee.profile_id == User.user_id, isouter=True).filter(search_filter).limit(limit)
+        employees_with_profiles = await session.execute(final_join_query)
+        # Convert to list to get actual count
+        employees_list = list(employees_with_profiles)
 
-            # Replace the entire employee processing section with this:
-            print(f"🔧 DEBUG: Building employee list from JOIN results")
-            employee_list = []
-            for emp, profile in employees_list:
-                print(f"🔧 DEBUG: Processing employee: {emp.employee_id}, profile: {profile.first_name} {profile.last_name}")
+        # Replace the entire employee processing section with this:
+        employee_list = []
+        for emp, profile in employees_list:
 
                 # Build employee data with profile information
                 employee_data = {
@@ -1038,15 +1114,8 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                 }
                 # Add to employee list without any additional filtering
                 employee_list.append(employee_data)
-                print(f"🔧 DEBUG: Added employee {emp.employee_id} to list")
 
-            print(f"🔧 DEBUG: Final employee_list count: {len(employee_list)}")
-            for i, emp in enumerate(employee_list):
-                print(f"🔧 DEBUG: Final result {i}: {emp['profile']['full_name']} (ID: {emp['employee_id']})")
-
-            print(f"🔧 DEBUG: Returning EmployeeToolResult with search_term='{search_term}'")
-
-            return EmployeeToolResult(
+        return EmployeeToolResult(
                 success=True,
                     message=f"📋 Found {len(employee_list)} employees matching '{search_term}'. Please format this data to include ALL fields: Employee Number, Job Title, Department, Employment Type, Work Schedule, Hire Date, Rate, and Email address from the profile data.",
                 data={
@@ -1132,8 +1201,6 @@ async def get_employee_details_tool(employee_id: int) -> EmployeeToolResult:
 async def get_all_employees_tool() -> EmployeeToolResult:
     """Tool for getting all employees with basic information"""
     try:
-        print(f"🔧 DEBUG: ===== GET_ALL_EMPLOYEES_TOOL CALLED =====")
-        print(f"🔧 DEBUG: get_all_employees_tool called - returning ALL employees without filtering")
         # Always create a fresh database session to avoid session closure issues
         async with get_ai_db() as session:
         

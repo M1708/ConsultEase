@@ -77,12 +77,6 @@ class EnhancedAgentNodeExecutor:
         
         try:
             # 🚀 PERFORMANCE OPTIMIZATION: Track agent execution for contract search optimization
-            # TODO: Remove debug statements once performance is optimized
-            print(f"🔧 DEBUG: Starting {agent_name} execution")
-            if state.get('messages'):
-                last_message = state['messages'][-1]
-                if hasattr(last_message, 'content'):
-                    print(f"🔧 DEBUG: User message: '{last_message.content[:100]}...'")
             
             # Generate cache key for potential response caching
             cache_key = self._generate_cache_key(state, agent_name)
@@ -1255,20 +1249,7 @@ def employee_agent_node_sync(state: AgentState) -> Dict:
     """Sync wrapper for employee agent node."""
     print("--- Running Enhanced Employee Agent Node (Sync) ---")
     
-    # 🔧 DEBUG: Track agent input state
-    print(f"🔧 DEBUG: Employee agent input state (sync) - messages count: {len(state.get('messages', []))}")
-    if state.get('messages'):
-        last_message = state['messages'][-1]
-        print(f"🔧 DEBUG: Last user message (sync): '{last_message.content[:100] if hasattr(last_message, 'content') else 'N/A'}...'")
-    
     result = asyncio.run(enhanced_executor.invoke(state, employee_agent_instance, "employee_agent"))
-    
-    # 🔧 DEBUG: Track agent output
-    print(f"🔧 DEBUG: Employee agent output (sync) - messages count: {len(result.get('messages', []))}")
-    if result.get('messages'):
-        last_response = result['messages'][-1]
-        content = getattr(last_response, 'content', None)
-        print(f"🔧 DEBUG: Agent response (sync): '{content[:200] if content else 'N/A'}...'")
     
     return result
 
@@ -1306,20 +1287,7 @@ async def employee_agent_node_async(state: AgentState) -> Dict:
     """
     print("--- Running Enhanced Employee Agent Node ---")
     
-    # 🔧 DEBUG: Track agent input state
-    print(f"🔧 DEBUG: Employee agent input state - messages count: {len(state.get('messages', []))}")
-    if state.get('messages'):
-        last_message = state['messages'][-1]
-        print(f"🔧 DEBUG: Last user message: '{last_message.content[:100] if hasattr(last_message, 'content') else 'N/A'}...'")
-    
     result = await enhanced_executor.invoke(state, employee_agent_instance, "employee_agent")
-    
-    # 🔧 DEBUG: Track agent output
-    print(f"🔧 DEBUG: Employee agent output - messages count: {len(result.get('messages', []))}")
-    if result.get('messages'):
-        last_response = result['messages'][-1]
-        content = getattr(last_response, 'content', None)
-        print(f"🔧 DEBUG: Agent response: '{content[:200] if content else 'N/A'}...'")
     
     return result
 

@@ -165,25 +165,19 @@ class EnhancedRoutingLogic:
         """
         message_lower = user_message.lower()
         
-        print(f"🔧 DEBUG: Enhanced routing - classifying: '{user_message}'")
-        
         # Step 1: Identify operation type
         operation_type = self._identify_operation_type(message_lower)
-        print(f"🔧 DEBUG: Enhanced routing - operation type: {operation_type}")
         
         # Step 2: Score each agent based on keyword matches
         agent_scores = self._calculate_agent_scores(user_message, message_lower)
-        print(f"🔧 DEBUG: Enhanced routing - base scores: {agent_scores}")
         
         # Step 3: Apply context-aware adjustments
         adjusted_scores = self._apply_context_adjustments(
             user_message, message_lower, agent_scores, operation_type
         )
-        print(f"🔧 DEBUG: Enhanced routing - adjusted scores: {adjusted_scores}")
         
         # Step 4: Determine the best agent
         best_agent, confidence = self._select_best_agent(adjusted_scores)
-        print(f"🔧 DEBUG: Enhanced routing - selected agent: {best_agent} (confidence: {confidence})")
         
         # Step 5: Generate reasoning
         reasoning = self._generate_reasoning(

@@ -625,8 +625,6 @@ class SearchContractsParams(BaseModel):
 def search_contracts_tool(params: SearchContractsParams, context: Dict[str, Any], db: Session = None) -> ContractToolResult:
     """Flexible tool for searching contracts by client, status, or billing date."""
     # 🚀 PERFORMANCE OPTIMIZATION: Track contract search execution
-    # TODO: Remove debug statements once performance is optimized
-    print(f"🔧 DEBUG: search_contracts_tool called with params: {params.model_dump()}")
     
     db_created = False
     if db is None:
@@ -635,7 +633,6 @@ def search_contracts_tool(params: SearchContractsParams, context: Dict[str, Any]
     try:
         query = db.query(Contract).join(Client)
         filters_applied = []
-        print(f"🔧 DEBUG: Starting contract search with base query")
 
         if params.client_name:
             query = query.filter(Client.client_name.ilike(f"%{params.client_name}%"))
@@ -734,9 +731,6 @@ def search_contracts_tool(params: SearchContractsParams, context: Dict[str, Any]
         )
         
         # 🚀 PERFORMANCE OPTIMIZATION: Track contract search completion
-        # TODO: Remove debug statements once performance is optimized
-        print(f"🔧 DEBUG: search_contracts_tool completed - found {len(contract_list)} contracts")
-        print(f"🔧 DEBUG: Returning result: {result.message}")
         
         return result
     except Exception as e:

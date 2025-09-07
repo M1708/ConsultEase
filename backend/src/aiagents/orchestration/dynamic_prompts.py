@@ -512,6 +512,8 @@ EMPLOYEE UPDATE FORMATTING:
     - **Employment Type:** [type]
     - **Work Schedule:** [schedule]
     - **Rate:** [rate]
+  * End with a dynamic, helpful closing message that varies based on context
+  * Examples: "Is there anything else you'd like to know about this employee?", "Would you like to update any other employee information?", "Need help with anything else?", "What else can I assist you with today?"
 - Never return raw JSON data to the user
 - Always present information in a human-readable format
 

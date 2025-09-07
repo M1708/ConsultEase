@@ -165,8 +165,6 @@ If the request is a simple greeting, use handle_greeting.
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
                 
-                print(f"🔧 DEBUG: Router decision - function: {function_name}, args: {function_args}")
-                print(f"🔧 DEBUG: Router reasoning: {message.content}")
                 
                 return {
                     "function": function_name,
