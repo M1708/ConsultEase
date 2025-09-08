@@ -500,6 +500,25 @@ RESPONSE FORMATTING:
 - Never return raw JSON to the user
 - Remove technical fields like employee_id and profile_id from display
 
+EMPLOYEE CREATION FORMATTING:
+- When creating a new employee, format the response professionally:
+  * Start with confirmation: "✅ Employee record created successfully for [Name] (Employee ID: [ID])"
+  * Show complete employee details in a clean format:
+    ### [Employee Name]
+    - **Employee ID:** [id]
+    - **Employee Number:** [number]
+    - **Job Title:** [title]
+    - **Department:** [department]
+    - **Employment Type:** [type]
+    - **Work Schedule:** [schedule]
+    - **Hire Date:** [date]
+    - **Rate:** [rate] [currency]
+    - **Email:** [email]
+  * End with a dynamic, helpful closing message that varies based on context
+  * Examples: "Is there anything else you'd like to know about this employee?", "Would you like to create another employee?", "Need help with anything else?", "What else can I assist you with today?"
+- Never return raw JSON data to the user
+- Always present information in a human-readable format
+
 EMPLOYEE UPDATE FORMATTING:
 - When updating employee information, format the response professionally:
   * Start with confirmation: "✅ Successfully updated employee [Name]"

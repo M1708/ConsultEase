@@ -176,6 +176,22 @@ class EmployeeAgent:
                     }
                 }
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_employee",
+                    "description": "Delete an employee record from the HR system. Can delete by employee_id, profile_id, employee_number, or employee_name.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "employee_id": {"type": "integer", "description": "Employee ID"},
+                            "profile_id": {"type": "string", "description": "Profile ID (UUID)"},
+                            "employee_number": {"type": "string", "description": "Employee number"},
+                            "employee_name": {"type": "string", "description": "Employee name (first name, last name, or full name)"}
+                        }
+                    }
+                }
+            }
         ]
 
     def get_capabilities(self) -> Dict[str, Any]:

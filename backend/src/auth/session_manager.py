@@ -6,22 +6,53 @@ from typing import Optional, Dict, Any
 import os
 
 class SessionManager:
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(SessionManager, cls).__new__(cls)
+        return cls._instance
     def __init__(self):
+        # Only initialize once
+        if self._initialized:
+            return
+            
         redis_url = os.getenv("REDIS_URL")
+        self.redis_available = False
+        self.redis_client = None
+        
         if not redis_url:
-            print("Warning: REDIS_URL not found. Using mock session manager for tests.")
-            self.redis_client = None
+            print("Warning: REDIS_URL not found. Using in-memory session manager.")
         else:
             try:
-                self.redis_client = redis.from_url(redis_url, decode_responses=True)
+                # Optimize Redis connection for better performance
+                self.redis_client = redis.from_url(
+                    redis_url, 
+                    decode_responses=True,
+                    socket_connect_timeout=2,  # 2s connection timeout
+                    socket_timeout=2,          # 2s socket timeout
+                    retry_on_timeout=True,     # Retry on timeout
+                    health_check_interval=30,  # Health check every 30s
+                    max_connections=10         # Limit connections
+                )
+                # Test connection
+                self.redis_client.ping()
+                self.redis_available = True
+                print("Redis session manager initialized successfully.")
             except Exception as e:
-                print(f"Warning: Failed to connect to Redis: {e}. Using mock session manager.")
+                print(f"Warning: Failed to connect to Redis: {e}. Using in-memory session manager.")
                 self.redis_client = None
+                self.redis_available = False
+                
         self.session_ttl = int(os.getenv("SESSION_TTL", "86400"))  # 24 hours
         
-        # Mock storage for testing
+        # In-memory storage for fallback
         self._mock_sessions = {}
         self._mock_chats = {}
+        
+        # Mark as initialized
+        self._initialized = True
         
     async def get_or_create_session(
         self, 
@@ -31,13 +62,15 @@ class SessionManager:
         role: str
     ) -> str:
         """Get existing session or create new one"""
-        if not self.redis_client:
-            # Mock implementation for tests
+        if not self.redis_available or not self.redis_client:
+            # In-memory implementation for fallback
             for session_id, data in self._mock_sessions.items():
                 if data['user_id'] == user_id:
+                    # Update last accessed
+                    data['last_accessed'] = datetime.utcnow().isoformat()
                     return session_id
             
-            # Create new mock session
+            # Create new in-memory session
             session_id = str(uuid.uuid4())
             self._mock_sessions[session_id] = {
                 "session_id": session_id,
@@ -49,60 +82,77 @@ class SessionManager:
             }
             return session_id
         
-        # Redis implementation
-        existing_sessions = self.redis_client.keys(f"session:*:user:{user_id}")
-        
-        for session_key in existing_sessions:
-            session_data = self.redis_client.get(session_key)
-            if session_data:
-                data = json.loads(session_data)
-                # Extend session TTL
-                self.redis_client.expire(session_key, self.session_ttl)
-                return data['session_id']
-        
-        # Create new session
-        session_id = str(uuid.uuid4())
-        session_key = f"session:{session_id}:user:{user_id}"
-        
-        session_data = {
-            "session_id": session_id,
-            "user_id": user_id,
-            "email": email,
-            "role": role,
-            "created_at": datetime.utcnow().isoformat(),
-            "last_accessed": datetime.utcnow().isoformat()
-        }
-        
-        self.redis_client.setex(
-            session_key, 
-            self.session_ttl, 
-            json.dumps(session_data)
-        )
-        
-        return session_id
+        try:
+            # Redis implementation with error handling
+            existing_sessions = self.redis_client.keys(f"session:*:user:{user_id}")
+            
+            for session_key in existing_sessions:
+                session_data = self.redis_client.get(session_key)
+                if session_data:
+                    data = json.loads(session_data)
+                    # Extend session TTL
+                    self.redis_client.expire(session_key, self.session_ttl)
+                    return data['session_id']
+            
+            # Create new session
+            session_id = str(uuid.uuid4())
+            session_key = f"session:{session_id}:user:{user_id}"
+            
+            session_data = {
+                "session_id": session_id,
+                "user_id": user_id,
+                "email": email,
+                "role": role,
+                "created_at": datetime.utcnow().isoformat(),
+                "last_accessed": datetime.utcnow().isoformat()
+            }
+            
+            self.redis_client.setex(
+                session_key, 
+                self.session_ttl, 
+                json.dumps(session_data)
+            )
+            
+            return session_id
+            
+        except Exception as e:
+            print(f"Redis error, falling back to in-memory: {e}")
+            # Fallback to in-memory storage
+            self.redis_available = False
+            return await self.get_or_create_session(user_id, auth_user_id, email, role)
     
     async def get_session(self, session_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Get session data"""
-        if not self.redis_client:
-            # Mock implementation
+        if not self.redis_available or not self.redis_client:
+            # In-memory implementation
             data = self._mock_sessions.get(session_id)
             if data and data['user_id'] == user_id:
                 data["last_accessed"] = datetime.utcnow().isoformat()
                 return data
             return None
         
-        # Redis implementation
-        session_key = f"session:{session_id}:user:{user_id}"
-        session_data = self.redis_client.get(session_key)
-        
-        if session_data:
-            data = json.loads(session_data)
-            # Update last accessed
-            data["last_accessed"] = datetime.utcnow().isoformat()
-            self.redis_client.setex(session_key, self.session_ttl, json.dumps(data))
-            return data
-        
-        return None
+        try:
+            # Redis implementation with error handling
+            session_key = f"session:{session_id}:user:{user_id}"
+            session_data = self.redis_client.get(session_key)
+            
+            if session_data:
+                data = json.loads(session_data)
+                # Update last accessed
+                data["last_accessed"] = datetime.utcnow().isoformat()
+                self.redis_client.setex(session_key, self.session_ttl, json.dumps(data))
+                return data
+            
+            return None
+            
+        except Exception as e:
+            print(f"Redis error in get_session, falling back to in-memory: {e}")
+            self.redis_available = False
+            data = self._mock_sessions.get(session_id)
+            if data and data['user_id'] == user_id:
+                data["last_accessed"] = datetime.utcnow().isoformat()
+                return data
+            return None
     
     async def invalidate_session(self, session_id: str, user_id: str) -> bool:
         """Invalidate a specific session"""

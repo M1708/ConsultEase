@@ -23,7 +23,8 @@ from  src.aiagents.tools.client_tools import (
 from src.aiagents.tools.employee_tools import (
     create_employee_tool, update_employee_tool, search_employees_tool,
     get_employee_details_tool, get_all_employees_tool, search_profiles_by_name_tool,
-    CreateEmployeeParams, UpdateEmployeeParams, parse_employee_details_from_message
+    delete_employee_tool, CreateEmployeeParams, UpdateEmployeeParams, DeleteEmployeeParams,
+    parse_employee_details_from_message
 )
 from src.database.core.models import Employee
 # ... import other tools for other agents as they are integrated
@@ -453,14 +454,36 @@ async def _get_all_employees_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for getting all employees in the system"""
     kwargs.pop('db', None)
     result = await get_all_employees_tool()
-    return result.model_dump()
+    return result.dict()
+
+async def _delete_employee_wrapper(**kwargs) -> Dict[str, Any]:
+    """Wrapper for deleting an employee"""
+    kwargs.pop('db', None)
+    context = kwargs.pop('context', {})
+    
+    # Extract parameters
+    employee_id = kwargs.get('employee_id')
+    profile_id = kwargs.get('profile_id')
+    employee_number = kwargs.get('employee_number')
+    employee_name = kwargs.get('employee_name')
+    
+    # Create DeleteEmployeeParams
+    params = DeleteEmployeeParams(
+        employee_id=employee_id,
+        profile_id=profile_id,
+        employee_number=employee_number,
+        employee_name=employee_name
+    )
+    
+    result = await delete_employee_tool(params, context)
+    return result.dict()
 
 async def _search_profiles_by_name_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for searching user profiles by name"""
     kwargs.pop('db', None)
     search_term = kwargs.get("search_term")
     result = await search_profiles_by_name_tool(search_term)
-    return result.model_dump()
+    return result.dict()
 
 async def _update_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for updating employee from natural language details - complete solution for employee updates"""
@@ -713,6 +736,7 @@ TOOL_REGISTRY = {
     "get_employee_details": _get_employee_details_wrapper,
     "get_all_employees": _get_all_employees_wrapper,
     "search_profiles_by_name": _search_profiles_by_name_wrapper,
+    "delete_employee": _delete_employee_wrapper,
 
     
     # Other tools will be registered here

@@ -8,6 +8,11 @@ from src.auth import routes as auth_routes
 from src.auth.middleware import auth_middleware
 from  src.auth.session_manager import SessionManager
 
+# Import performance systems
+from src.aiagents.performance.intelligent_cache import cache_manager
+from src.aiagents.performance.optimization_engine import start_optimization_engine, stop_optimization_engine
+from src.aiagents.performance.metrics_collector import metrics_collector
+
 
 # Create database tables
 #Base.metadata.create_all(bind=engine)
@@ -52,14 +57,43 @@ app.include_router(chat_sessions.router, prefix="/api/chat", tags=["chat-session
 
 @app.on_event("startup")
 async def startup():
-    """Initialize database tables on startup"""
+    """Initialize systems on startup"""
+    # Initialize database tables
     await create_tables()
-    print("Database tables created successfully")
+    print("✅ Database tables created successfully")
+    
+    # Initialize performance systems
+    try:
+        # Start optimization engine
+        await start_optimization_engine()
+        print("✅ Performance optimization engine started")
+        
+        # Initialize cache manager
+        cache_manager.get_cache("employee")  # Initialize employee cache
+        print("✅ Intelligent cache system initialized")
+        
+        # Set up performance monitoring
+        metrics_collector.set_alert_threshold("employee_cache_hit_rate", low_threshold=0.7)
+        metrics_collector.set_alert_threshold("employee_operation_duration", high_threshold=5.0)
+        print("✅ Performance monitoring configured")
+        
+    except Exception as e:
+        print(f"⚠️ Warning: Performance systems initialization failed: {e}")
+        print("Application will continue without performance optimizations")
 
 @app.on_event("shutdown")
 async def shutdown():
     """Clean shutdown"""
+    try:
+        # Stop optimization engine
+        await stop_optimization_engine()
+        print("✅ Performance optimization engine stopped")
+    except Exception as e:
+        print(f"⚠️ Warning: Error stopping optimization engine: {e}")
+    
+    # Dispose database engine
     await async_engine.dispose()
+    print("✅ Database engine disposed")
 
 @app.get("/")
 def root():
@@ -76,10 +110,18 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         session_manager = SessionManager()
         session_manager.redis_client.ping()
         
+        # Get performance metrics
+        performance_stats = metrics_collector.get_all_metrics_summary()
+        
         return {
             "status": "healthy", 
             "database": "connected",
-            "redis": "connected"
+            "redis": "connected",
+            "performance": {
+                "total_metrics": performance_stats.get("total_metrics", 0),
+                "collection_overhead_ms": performance_stats.get("collection_overhead", {}).get("avg_ms", 0),
+                "cache_stats": performance_stats.get("gauges", {})
+            }
         }
     except Exception as e:
         return {
@@ -87,4 +129,25 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             "database": "disconnected", 
             "redis": "disconnected",
             "error": str(e)
+        }
+
+@app.get("/performance")
+async def performance_metrics():
+    """Performance metrics endpoint"""
+    try:
+        # Get comprehensive performance metrics
+        metrics_summary = metrics_collector.get_all_metrics_summary()
+        
+        # Get cache statistics
+        from src.aiagents.performance.employee_cache import get_employee_cache_stats
+        cache_stats = await get_employee_cache_stats()
+        
+        return {
+            "metrics": metrics_summary,
+            "cache": cache_stats,
+            "timestamp": metrics_summary.get("collection_time")
+        }
+    except Exception as e:
+        return {
+            "error": f"Failed to get performance metrics: {str(e)}"
         }

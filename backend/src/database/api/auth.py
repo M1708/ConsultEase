@@ -8,6 +8,10 @@ from src.services.auth_service import verify_supabase_jwt
 from datetime import datetime
 import uuid
 
+# Simple in-memory cache for user profiles (5 minute TTL)
+_user_profile_cache = {}
+_cache_ttl = 300  # 5 minutes
+
 router = APIRouter()
 
 @router.get("/profile/{auth_user_id}")
@@ -18,6 +22,16 @@ async def get_user_profile(
 ):
     """Get user profile by Supabase auth user ID"""
     try:
+        # Check cache first
+        cache_key = f"profile:{auth_user_id}"
+        if cache_key in _user_profile_cache:
+            cached_data, timestamp = _user_profile_cache[cache_key]
+            if datetime.utcnow().timestamp() - timestamp < _cache_ttl:
+                return cached_data
+            else:
+                # Remove expired cache entry
+                del _user_profile_cache[cache_key]
+        
         # Verify the JWT token if provided
         if authorization:
             token = authorization.replace("Bearer ", "")
@@ -39,7 +53,7 @@ async def get_user_profile(
         user.last_login = datetime.utcnow()
         await db.commit()
         
-        return {
+        profile_data = {
             "user_id": str(user.user_id),
             "email": user.email,
             "first_name": user.first_name,
@@ -60,6 +74,11 @@ async def get_user_profile(
             "created_at": user.created_at.isoformat(),
             "updated_at": user.updated_at.isoformat()
         }
+        
+        # Cache the result
+        _user_profile_cache[cache_key] = (profile_data, datetime.utcnow().timestamp())
+        
+        return profile_data
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get user profile: {str(e)}")

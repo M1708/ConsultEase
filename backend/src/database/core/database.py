@@ -40,37 +40,41 @@ if IS_PGBOUNCER or "supabase.com" in (DATABASE_URL or ""):
 if DATABASE_URL and ("supabase.com" in DATABASE_URL or "pooler" in DATABASE_URL.lower()):
     IS_PGBOUNCER = True
 
-# 🚀 ASYNC ENGINE: PGBOUNCER COMPATIBLE - Maximum performance for AgenticAI
+# 🚀 ASYNC ENGINE: OPTIMIZED FOR PERFORMANCE - Balanced approach
 async_engine = create_async_engine(
     ASYNC_DATABASE_URL,
-    # PGBOUNCER COMPATIBILITY: Use NullPool to avoid connection pooling conflicts
-    poolclass=NullPool,  # Essential for pgbouncer compatibility
+    # Use QueuePool for better performance with connection reuse
+    poolclass=None,  # Use default QueuePool for better performance
     
-    # ASYNC CONNECTION SETTINGS - PGBOUNCER OPTIMIZED
+    # ASYNC CONNECTION SETTINGS - Performance optimized
     connect_args={
         # PGBOUNCER COMPATIBILITY: Disable prepared statements (CRITICAL for Supabase pooler)
         "statement_cache_size": 0,                    # Disable statement caching
         "prepared_statement_cache_size": 0,           # Disable prepared statement caching
         
         # CONNECTION TIMEOUTS - Optimized for AI queries
-        "timeout": 10,                                # 10s connection timeout
-        "command_timeout": 30,                        # 30s query timeout
+        "timeout": 5,                                 # 5s connection timeout (faster)
+        "command_timeout": 15,                        # 15s query timeout (faster)
         
-        # SERVER SETTINGS - Performance optimized + PGBOUNCER COMPATIBLE
+        # SERVER SETTINGS - Performance optimized
         "server_settings": {
             "application_name": "AgenticAI_Async",
             "jit": "off",                             # Disable JIT for simple AI queries
             "work_mem": "4MB",                        # Optimize for small, fast queries
-            "statement_timeout": "30s",               # Hard limit on query execution
+            "statement_timeout": "15s",               # Hard limit on query execution
         },
     },
     
     # PERFORMANCE SETTINGS
     echo=False,                      # Disable SQL logging in production
     future=True,                     # SQLAlchemy 2.0 style
-    # PGBOUNCER COMPATIBILITY: Additional settings
-    pool_pre_ping=False,             # Disable pre-ping for pgbouncer
-    pool_recycle=-1,                 # Disable connection recycling
+    
+    # CONNECTION POOL SETTINGS - Optimized for performance
+    pool_size=5,                     # Small pool size for efficiency
+    max_overflow=10,                 # Allow overflow for bursts
+    pool_pre_ping=True,              # Enable pre-ping for connection health
+    pool_recycle=3600,              # Recycle connections every hour
+    pool_timeout=10,                # 10s timeout for getting connection from pool
 )
 
 # Async session factory
