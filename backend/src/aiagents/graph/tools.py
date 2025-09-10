@@ -725,13 +725,10 @@ async def _upload_employee_document_wrapper(**kwargs) -> dict:
         file_size = kwargs.get('file_size')
         mime_type = kwargs.get('mime_type')
         
-        # CRITICAL: If any parameter is a placeholder, get the real data from context
-        if (file_data == "[USE_ACTUAL_FILE_DATA_FROM_CONTEXT]" or 
-            filename == "[USE_ACTUAL_FILENAME_FROM_CONTEXT]" or 
-            file_size == "[USE_ACTUAL_FILE_SIZE_FROM_CONTEXT]" or 
-            mime_type == "[USE_ACTUAL_MIME_TYPE_FROM_CONTEXT]"):
+        # CRITICAL: If file_data is a placeholder, get the real data from context
+        if file_data == "<base64_encoded_data>":
             if context and 'file_info' in context:
-                file_data = context['file_info'].get('file_data', file_data)
+                file_data = context['file_info'].get('file_data')
                 filename = context['file_info'].get('filename', filename)
                 file_size = context['file_info'].get('file_size', file_size)
                 mime_type = context['file_info'].get('mime_type', mime_type)

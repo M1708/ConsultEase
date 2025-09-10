@@ -261,12 +261,13 @@ class EnhancedAgentNodeExecutor:
                 context_info.append(f"File type: {file_info.get('mime_type', 'unknown')}")
                 context_info.append(f"File data available: {'Yes' if file_info.get('file_data') else 'No'}")
                 
-                # CRITICAL: Include the actual file data for the agent to use
+                # CRITICAL: Tell agent that file data is available (tool wrapper will handle the actual data)
                 if file_info.get('file_data'):
-                    context_info.append(f"ACTUAL_FILE_DATA: {file_info.get('file_data')}")
-                    context_info.append(f"ACTUAL_FILENAME: {file_info.get('filename')}")
-                    context_info.append(f"ACTUAL_FILE_SIZE: {file_info.get('file_size')}")
-                    context_info.append(f"ACTUAL_MIME_TYPE: {file_info.get('mime_type')}")
+                    context_info.append(f"FILE_DATA_AVAILABLE: Yes - Tool wrapper will access the real data")
+                    context_info.append(f"FILENAME: {file_info.get('filename')}")
+                    context_info.append(f"FILE_SIZE: {file_info.get('file_size')}")
+                    context_info.append(f"MIME_TYPE: {file_info.get('mime_type')}")
+                    context_info.append(f"INSTRUCTION: Use placeholder '<base64_encoded_data>' - tool wrapper will replace with real data")
                 
                 print(f"🔍 DEBUG: File info in context: {file_info.get('filename')}")
                 print(f"🔍 DEBUG: File data length in context: {len(file_info.get('file_data', ''))}")

@@ -1661,7 +1661,11 @@ async def upload_employee_document_tool(params: UploadEmployeeDocumentParams, co
                 if params.document_type == "nda":
                     upload_result = await storage_service.upload_employee_nda_document(file_obj, employee.employee_id)
                 elif params.document_type == "contract":
+                    print(f"🔍 DEBUG: Starting contract upload for employee {employee.employee_id}")
+                    print(f"🔍 DEBUG: Contract file size: {params.file_size} bytes")
+                    print(f"🔍 DEBUG: Contract filename: {params.filename}")
                     upload_result = await storage_service.upload_employee_contract_document(file_obj, employee.employee_id)
+                    print(f"🔍 DEBUG: Contract upload result: {upload_result}")
                 else:
                     return EmployeeToolResult(
                         success=False,
