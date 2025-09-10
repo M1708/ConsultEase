@@ -357,6 +357,18 @@ class EmployeeUpdate(BaseModel):
     currency: Optional[str] = Field(None, max_length=3)
     nda_file_link: Optional[str] = Field(None, max_length=500)
     contract_file_link: Optional[str] = Field(None, max_length=500)
+    # Enhanced document fields for NDA
+    nda_document_bucket_name: Optional[str] = Field(None, max_length=50)
+    nda_document_file_size: Optional[int] = Field(None, ge=0)
+    nda_document_mime_type: Optional[str] = Field(None, max_length=100)
+    nda_document_uploaded_at: Optional[datetime] = None
+    nda_ocr_extracted_data: Optional[dict] = None
+    # Enhanced document fields for Contract
+    contract_document_bucket_name: Optional[str] = Field(None, max_length=50)
+    contract_document_file_size: Optional[int] = Field(None, ge=0)
+    contract_document_mime_type: Optional[str] = Field(None, max_length=100)
+    contract_document_uploaded_at: Optional[datetime] = None
+    contract_ocr_extracted_data: Optional[dict] = None
 
 class EmployeeResponse(EmployeeBase):
     employee_id: int
@@ -404,3 +416,33 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Employee Document Management Schemas
+class EmployeeDocumentUploadResponse(BaseModel):
+    """Response model for employee document upload operations"""
+    success: bool
+    message: str
+    document_type: str  # "nda" or "contract"
+    document_filename: Optional[str] = None
+    document_file_path: Optional[str] = None
+    file_size: Optional[int] = None
+    uploaded_at: Optional[datetime] = None
+
+class EmployeeDocumentInfo(BaseModel):
+    """Information about an employee document"""
+    document_type: str  # "nda" or "contract"
+    filename: Optional[str] = None
+    file_path: Optional[str] = None
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+    has_document: bool = False
+    download_url: Optional[str] = None
+    ocr_extracted_data: Optional[dict] = None
+
+class EmployeeDocumentsResponse(BaseModel):
+    """Response model for getting all employee documents"""
+    employee_id: int
+    employee_name: Optional[str] = None
+    nda_document: Optional[EmployeeDocumentInfo] = None
+    contract_document: Optional[EmployeeDocumentInfo] = None

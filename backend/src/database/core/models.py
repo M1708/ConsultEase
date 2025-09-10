@@ -208,9 +208,29 @@ class Employee(Base):
     rate = Column(Numeric(10, 2))
     currency = Column(String(3), default='USD')
     
-    # Documents
+    # Documents - Legacy fields (kept for backward compatibility)
     nda_file_link = Column(String(500))
     contract_file_link = Column(String(500))
+    
+    # Document fields for NDA - Enhanced storage with metadata
+    nda_document_bucket_name = Column(String(50), default='employee-nda-documents')
+    nda_document_file_size = Column(BigInteger)
+    nda_document_mime_type = Column(String(100))
+    nda_document_uploaded_at = Column(DateTime(timezone=True))
+    nda_ocr_extracted_data = Column(JSONB)
+    
+    # Document fields for Contract - Enhanced storage with metadata
+    contract_document_bucket_name = Column(String(50), default='employee-contract-documents')
+    contract_document_file_size = Column(BigInteger)
+    contract_document_mime_type = Column(String(100))
+    contract_document_uploaded_at = Column(DateTime(timezone=True))
+    contract_ocr_extracted_data = Column(JSONB)
+    
+    # Additional document metadata fields
+    nda_document_filename = Column(String(255))
+    nda_document_file_path = Column(Text)
+    contract_document_filename = Column(String(255))
+    contract_document_file_path = Column(Text)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

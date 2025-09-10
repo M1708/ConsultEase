@@ -9,6 +9,7 @@ interface ChatStore extends ChatState {
   clearMessages: () => void;
   setTyping: (typing: boolean) => void;
   addMessage: (message: ChatMessage) => void;
+  setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   clearError: () => void;
   loadChatSession: () => Promise<void>;
   saveChatSession: () => Promise<void>;
@@ -110,6 +111,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
       const response = await chatApi.sendMessage(request);
 
+      // Check if the request was successful
+      if (!response.success) {
+        throw new Error(response.response || response.error || 'Request failed');
+      }
+
       // Add agent response to chat
       const agentMessage: ChatMessage = {
         id: `agent_${Date.now()}`,
@@ -153,6 +159,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   addMessage: (message: ChatMessage) =>
     set((state) => ({
       messages: [...state.messages, message],
+    })),
+
+  setMessages: (messages) =>
+    set((state) => ({
+      messages: typeof messages === 'function' ? messages(state.messages) : messages,
     })),
 
   clearError: () => set({ error: null }),

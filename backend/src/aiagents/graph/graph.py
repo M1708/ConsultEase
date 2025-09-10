@@ -115,6 +115,7 @@ def after_agent_execution(state: AgentState) -> str:
 def after_tool_execution(state: AgentState) -> str:
     """Decides whether to continue with the agent or end the conversation."""
     # 🚀 PERFORMANCE OPTIMIZATION: Track execution flow for contract search optimization
+    
     # CRITICAL FIX: After tool execution, always return to the current agent
     # so it can process and format the tool results
     return state["current_agent"]

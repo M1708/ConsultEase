@@ -706,6 +706,135 @@ async def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
             "data": None
         }
 
+# Employee Document Management Tool Wrappers
+async def _upload_employee_document_wrapper(**kwargs) -> dict:
+    """Wrapper for uploading employee documents (NDA or contract)"""
+    try:
+        # Import here to avoid circular imports
+        from src.aiagents.tools.employee_tools import upload_employee_document_tool, UploadEmployeeDocumentParams
+        
+        kwargs.pop('db', None)
+        context = kwargs.pop('context', {})
+        
+        # Extract parameters
+        employee_id = kwargs.get('employee_id')
+        employee_name = kwargs.get('employee_name')
+        document_type = kwargs.get('document_type')
+        file_data = kwargs.get('file_data')
+        filename = kwargs.get('filename')
+        file_size = kwargs.get('file_size')
+        mime_type = kwargs.get('mime_type')
+        
+        # CRITICAL: If any parameter is a placeholder, get the real data from context
+        if (file_data == "[USE_ACTUAL_FILE_DATA_FROM_CONTEXT]" or 
+            filename == "[USE_ACTUAL_FILENAME_FROM_CONTEXT]" or 
+            file_size == "[USE_ACTUAL_FILE_SIZE_FROM_CONTEXT]" or 
+            mime_type == "[USE_ACTUAL_MIME_TYPE_FROM_CONTEXT]"):
+            if context and 'file_info' in context:
+                file_data = context['file_info'].get('file_data', file_data)
+                filename = context['file_info'].get('filename', filename)
+                file_size = context['file_info'].get('file_size', file_size)
+                mime_type = context['file_info'].get('mime_type', mime_type)
+                print(f"🔍 DEBUG: Tool wrapper - Using real file data from context: {len(file_data)} chars, size: {file_size}")
+            else:
+                print(f"🔍 DEBUG: Tool wrapper - No file_info in context, using placeholder data")
+        
+        # TODO: If this name validation causes issues with legitimate uploads, remove this section
+        # Additional validation: ensure employee_name is not a filename
+        if employee_name and not employee_id:
+            # Check if employee_name looks like a filename
+            if '.' in employee_name and len(employee_name.split('.')) == 2:
+                file_extensions = ['.pdf', '.docx', '.doc', '.txt', '.png', '.jpg', '.jpeg']
+                if any(employee_name.lower().endswith(ext) for ext in file_extensions):
+                    return {
+                        "success": False,
+                        "message": f"❌ Error: '{employee_name}' appears to be a filename, not an employee name. The agent should extract the actual employee name from the user message (e.g., 'Steve York' from 'for employee Steve York').",
+                        "data": None
+                    }
+        
+        # Create UploadEmployeeDocumentParams
+        params = UploadEmployeeDocumentParams(
+            employee_id=employee_id,
+            employee_name=employee_name,
+            document_type=document_type,
+            file_data=file_data,
+            filename=filename,
+            file_size=file_size,
+            mime_type=mime_type
+        )
+        
+        result = await upload_employee_document_tool(params, context)
+        return result.dict()
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"❌ Failed to upload employee document: {str(e)}",
+            "data": None
+        }
+
+async def _delete_employee_document_wrapper(**kwargs) -> dict:
+    """Wrapper for deleting employee documents (NDA or contract)"""
+    try:
+        # Import here to avoid circular imports
+        from src.aiagents.tools.employee_tools import delete_employee_document_tool, DeleteEmployeeDocumentParams
+        
+        kwargs.pop('db', None)
+        context = kwargs.pop('context', {})
+        
+        # Extract parameters
+        employee_id = kwargs.get('employee_id')
+        employee_name = kwargs.get('employee_name')
+        document_type = kwargs.get('document_type')
+        
+        # Create DeleteEmployeeDocumentParams
+        params = DeleteEmployeeDocumentParams(
+            employee_id=employee_id,
+            employee_name=employee_name,
+            document_type=document_type
+        )
+        
+        result = await delete_employee_document_tool(params, context)
+        return result.dict()
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"❌ Failed to delete employee document: {str(e)}",
+            "data": None
+        }
+
+async def _get_employee_document_wrapper(**kwargs) -> dict:
+    """Wrapper for getting employee document information and download URLs"""
+    try:
+        # Import here to avoid circular imports
+        from src.aiagents.tools.employee_tools import get_employee_document_tool, GetEmployeeDocumentParams
+        
+        kwargs.pop('db', None)
+        context = kwargs.pop('context', {})
+        
+        # Extract parameters
+        employee_id = kwargs.get('employee_id')
+        employee_name = kwargs.get('employee_name')
+        document_type = kwargs.get('document_type')
+        
+        # Create GetEmployeeDocumentParams
+        params = GetEmployeeDocumentParams(
+            employee_id=employee_id,
+            employee_name=employee_name,
+            document_type=document_type
+        )
+        
+        result = await get_employee_document_tool(params, context)
+        return result.dict()
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"❌ Failed to get employee document: {str(e)}",
+            "data": None
+        }
+
 # --- Central Tool Registry ---
 TOOL_REGISTRY = {
     "create_client": _create_client_wrapper,
@@ -737,6 +866,11 @@ TOOL_REGISTRY = {
     "get_all_employees": _get_all_employees_wrapper,
     "search_profiles_by_name": _search_profiles_by_name_wrapper,
     "delete_employee": _delete_employee_wrapper,
+    
+    # Employee Document Management Tools
+    "upload_employee_document": _upload_employee_document_wrapper,
+    "delete_employee_document": _delete_employee_document_wrapper,
+    "get_employee_document": _get_employee_document_wrapper,
 
     
     # Other tools will be registered here

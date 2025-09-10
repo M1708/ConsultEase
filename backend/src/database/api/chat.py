@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import traceback
 from src.database.core.database import get_ai_db
+import base64
 
 from datetime import datetime
 import time
@@ -70,6 +71,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    session_id: Optional[str] = None
+    file_info: Optional[Dict[str, Any]] = None
 
 class ChatResponse(BaseModel):
     response: str
@@ -261,16 +264,73 @@ async def fast_clients(chat_request: ChatRequest, request: Request):
             }
         )
 
-@router.post("/message")
-async def send_chat_message(chat_request: ChatRequest, request: Request):
+@router.post("/message-with-file")
+async def send_chat_message_with_file(
+    request: Request,
+    message: str = Form(...),
+    file: Optional[UploadFile] = File(None),
+    session_id: str = Form(...)
+):
     """
-    Sends a message to the new agentic graph and returns a JSON response.
+    Enhanced chat endpoint that handles file uploads with messages for agentic document management.
     """
-    #db = next(get_db())
-    
+    print(f"🚀 CHAT API: message-with-file endpoint called with message: {message}")
     try:
+        if not message:
+            raise HTTPException(status_code=400, detail="Message content is required.")
+        
+        # Authentication
+        print(f"🔍 DEBUG: Received message: {message[:100]}...")
+        print(f"🔍 DEBUG: Session ID: {session_id}")
+        print(f"🔍 DEBUG: File provided: {file.filename if file else 'None'}")
+        
+        # Get authenticated user
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        
+        token = auth_header.split(" ")[1]
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        
+        # Use a separate database session for authentication
+        async with get_ai_db() as auth_db:
+            current_user = await get_current_user(credentials, auth_db)
+        
+        # Now use the main database session for the rest of the function
         async with get_ai_db() as db:
-            message_content = chat_request.message
+            # Handle file upload if provided
+            file_data = None
+            file_info = None
+            if file and file.filename:
+                # Read file content
+                file_content = await file.read()
+                print(f"🔍 DEBUG: Raw file content length: {len(file_content)} bytes")
+                
+                file_data = base64.b64encode(file_content).decode('utf-8')
+                print(f"🔍 DEBUG: Base64 encoded length: {len(file_data)}")
+                
+                # Create file info for the agent
+                file_info = {
+                    "filename": file.filename,
+                    "mime_type": file.content_type or "application/octet-stream",
+                    "file_data": file_data,
+                    "file_size": len(file_content)
+                }
+                print(f"🔍 DEBUG: File processed - {file.filename} ({len(file_content)} bytes)")
+                print(f"🔍 DEBUG: File info file_data length: {len(file_info['file_data'])}")
+                
+                # Add file context to the message
+                message = f"{message}\n\n[File attached: {file.filename} ({file_info['file_size']} bytes)]"
+            
+            # Create enhanced chat request with file info
+            enhanced_request = ChatRequest(
+                message=message,
+                session_id=session_id,
+                file_info=file_info
+            )
+            
+            # Process through regular chat flow (inline implementation)
+            message_content = enhanced_request.message
             if not message_content:
                 raise HTTPException(status_code=400, detail="Message content is required.")
 
@@ -289,61 +349,190 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
             )
             
             if is_greeting:
-                print(f"🔥 CHAT API: ULTRA-FAST GREETING PATH!")
-                # Try to get personalized greeting with auth
-                try:
-                    print("Inside try block of ultra-fast greeting")
-                    
-                    auth_header = request.headers.get("authorization")
-                    if auth_header and auth_header.startswith("Bearer "):
-                        token = auth_header.split(" ")[1]
-                        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-                        
-                        current_user = await get_current_user(credentials, db)
-                        
-                        # Extract first name for personalized greeting
-                        first_name = ''
-                        if "my name is" in message_lower:
-                            try:
-                                # Find the start of the name in the original message
-                                # by finding "my name is" case-insensitively
-                                match_pos = message_content.lower().find("my name is")
-                                if match_pos != -1:
-                                    name_start_pos = match_pos + len("my name is")
-                                    first_name = message_content[name_start_pos:].strip()
-                            except:
-                                pass
-                        if not first_name:
-                            user_name = f"{current_user.user.first_name} {current_user.user.last_name}" if current_user.user.first_name and current_user.user.last_name else current_user.user.first_name or current_user.user.last_name or current_user.user.email
-                            first_name = user_name.split()[0] if user_name else ''
-                        
-                        if first_name:
-                            greeting_response = f"Hello {first_name}! How can I help you today?"
-                            session_id = current_user.session_id
-                            print(f"🔥 CHAT API: Personalized greeting for {first_name}")
-                            
-                            return ChatResponse(
-                                response=greeting_response,
-                                agent="Milo",
-                                success=True,
-                                timestamp=datetime.now().isoformat(),
-                                session_id=session_id,
-                                workflow_id=f"workflow_{datetime.now().timestamp()}",
-                                data={
-                                    "processing_time": {"greeting": "< 0.1s"},
-                                    "status": "ultra_fast_greeting_personalized"
-                                }
-                            )
-                except Exception as auth_error:
-                    print(f"🔥 CHAT API: Auth failed for greeting, using generic: {auth_error}")
+                return {
+                    "response": f"Hello! I'm Milo, your ConsultEase AI assistant. How can I help you today?",
+                    "agent": "Milo",
+                    "success": True,
+                    "timestamp": datetime.now().isoformat(),
+                    "session_id": session_id,
+                    "workflow_id": None,
+                    "data": {"status": "greeting_detected"}
+                }
+
+            # Get or create session
+            session_manager = SessionManager()
+            existing_state = None
+            user_id = str(current_user.user_id)
+            try:
+                existing_state = await session_manager.get_session(session_id, user_id)
+                print(f"🔄 CHAT API: Found existing state for session {session_id}")
+            except Exception as e:
+                print(f"🔄 CHAT API: No existing state found, creating new: {e}")
+            
+            # Create or update state
+            if existing_state:
+                # Add new message to existing conversation
+                new_message = HumanMessage(content=message_content)
+                existing_state["messages"].append(new_message)
                 
-                # Fallback to generic greeting
+                # Update context
+                existing_state["context"]["last_interaction"] = datetime.now().isoformat()
+                existing_state["context"]["interaction_count"] += 1
+                existing_state["status"] = "processing"
+                
+                initial_state = existing_state
+                print(f"🔄 CHAT API: Updated existing state, now has {len(initial_state['messages'])} messages")
+            else:
+                # Create new conversation state
+                initial_message = HumanMessage(content=message_content)
+                initial_state = create_initial_state(
+                    user_id=user_id,
+                    session_id=session_id,
+                    user_name=current_user.user.full_name or current_user.user.email,
+                    user_role=current_user.role,
+                    initial_message=initial_message
+                )
+                
+                print(f"🔄 CHAT API: Created new conversation state")
+            
+            # Add file_info to context if provided
+            if hasattr(enhanced_request, 'file_info') and enhanced_request.file_info:
+                print(f"🔍 DEBUG: Adding file_info to context - file_data length: {len(enhanced_request.file_info.get('file_data', ''))}")
+                print(f"🔍 DEBUG: File_info keys: {list(enhanced_request.file_info.keys())}")
+                initial_state["context"]["file_info"] = enhanced_request.file_info
+
+            # Process through agent graph
+            print(f"🔍 DEBUG: File upload - Invoking agent with recursion_limit=20")
+            print(f"🔍 DEBUG: File upload - Initial state keys: {list(initial_state.keys())}")
+            print(f"🔍 DEBUG: File upload - Context keys: {list(initial_state.get('context', {}).keys())}")
+            result = await agent_app.ainvoke(initial_state, config={"recursion_limit": 20})
+            print(f"🔍 DEBUG: File upload - Agent invocation completed")
+            
+            # TODO: ERROR HANDLING - Extract the response from the result and check for errors
+            if result and "messages" in result and len(result["messages"]) > 0:
+                last_message = result["messages"][-1]
+                if hasattr(last_message, 'content'):
+                    response_text = last_message.content
+                else:
+                    response_text = str(last_message)
+                
+                # TODO: ERROR HANDLING - Check if the response indicates an error
+                is_error = any(error_indicator in response_text for error_indicator in [
+                    "❌ No employee found",
+                    "❌ Invalid file data", 
+                    "❌ User context not available",
+                    "❌ Error",
+                    "Failed to",
+                    "Recursion limit"
+                ])
+            else:
+                response_text = "I'm sorry, I couldn't process your request. Please try again."
+                is_error = True
+            
+            # Determine the agent name
+            agent_name = "Milo"
+            if "agent" in result.get("context", {}):
+                agent_name = result["context"]["agent"]
+            
+            # Save the updated state
+            try:
+                await session_manager.save_session(session_id, result)
+                print(f"💾 CHAT API: Saved session {session_id}")
+            except Exception as e:
+                print(f"⚠️ CHAT API: Failed to save session: {e}")
+            
+            # TODO: ERROR HANDLING - Return success: false for errors to trigger frontend clearing
+            return {
+                "response": response_text,
+                "agent": agent_name,
+                "success": not is_error,  # TODO: ERROR HANDLING - Set success based on error detection
+                "timestamp": datetime.now().isoformat(),
+                "session_id": session_id,
+                "workflow_id": result.get("workflow_id"),
+                "data": result.get("data", {})
+            }
+            
+    except Exception as e:
+        print(f"❌ Chat processing with file failed: {str(e)}")
+        return {
+            "response": f"I encountered an error processing your request with file: {str(e)}",
+            "agent": "error_handler",
+            "success": False,
+            "status": "chat_with_file_error",
+            "error": str(e)
+        }
+
+@router.post("/message")
+async def send_chat_message(chat_request: ChatRequest, request: Request):
+    """
+    Sends a message to the new agentic graph and returns a JSON response.
+    """
+    #db = next(get_db())
+    
+    try:
+        message_content = chat_request.message
+        if not message_content:
+            raise HTTPException(status_code=400, detail="Message content is required.")
+
+        # Authentication - outside database session to avoid nested sessions
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        
+        token = auth_header.split(" ")[1]
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        
+        # Use a separate database session for authentication
+        async with get_ai_db() as auth_db:
+            current_user = await get_current_user(credentials, auth_db)
+        
+        # Now use the main database session for the rest of the function
+        async with get_ai_db() as db:
+            # ULTRA-FAST greeting detection AFTER authentication
+            message_lower = message_content.lower().strip()
+            
+            # Simple and explicit greeting detection
+            simple_greetings = ["hi", "hello", "hey", "hola", "howdy", "greetings"]
+            greeting_phrases = ["good morning", "good afternoon", "good evening", "good night"]
+            
+            is_greeting = (
+                message_lower in simple_greetings or
+                any(message_lower.startswith(g + ' ') for g in simple_greetings) or
+                any(phrase in message_lower for phrase in greeting_phrases) or
+                "my name is" in message_lower
+            )
+            
+            if is_greeting:
+                print(f"🔥 CHAT API: ULTRA-FAST GREETING PATH!")
+                print(f"🔍 DEBUG: Greeting detected - {message_content}")
+                
+                # Extract first name for personalized greeting
+                first_name = ''
+                if "my name is" in message_lower:
+                    try:
+                        # Find the start of the name in the original message
+                        # by finding "my name is" case-insensitively
+                        match_pos = message_content.lower().find("my name is")
+                        if match_pos != -1:
+                            name_start_pos = match_pos + len("my name is")
+                            first_name = message_content[name_start_pos:].strip()
+                    except:
+                        pass
+                
+                # Use authenticated user's name if no name provided
+                if not first_name:
+                    user_name = current_user.user.full_name or current_user.user.email
+                    first_name = user_name.split()[0] if user_name else ''
+                
+                greeting_response = f"Hello{(' ' + first_name) if first_name else ''}! How can I help you today?"
+                print(f"🔥 CHAT API: Greeting response: {greeting_response}")
+                
                 return ChatResponse(
-                    response="Hello! How can I help you today?",
+                    response=greeting_response,
                     agent="Milo",
                     success=True,
                     timestamp=datetime.now().isoformat(),
-                    session_id="fast-greeting",
+                    session_id=current_user.session_id,
                     workflow_id=f"workflow_{datetime.now().timestamp()}",
                     data={
                         "processing_time": {"greeting": "< 0.01s"},
@@ -409,73 +598,26 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 # Redirect to fast clients endpoint
                 return await fast_clients(request)
             
-            # For non-fast-path messages, get dependencies and proceed normally
-            print(f"🔥 CHAT API: Getting dependencies for complex query...")
+            # For non-fast-path messages, proceed with LangGraph
+            print(f"🔥 CHAT API: Processing complex query...")
+            print(f"🔍 DEBUG: Regular message - {message_content[:100]}...")
+            print(f"🔍 DEBUG: Session ID: {chat_request.session_id}")
             
-            try:
-                # Extract token from Authorization header
-                auth_header = request.headers.get("authorization")
-                current_user = None
-                
-                if auth_header and auth_header.startswith("Bearer "):
-                    try:
-                        token = auth_header.split(" ")[1]
-                        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-                        current_user = await get_current_user(credentials, db)
-                        print(f"✅ Auth successful for user: {current_user.user.email}")
-                    except Exception as e:
-                        print(f"❌ Auth failed: {e}")
-                        # For testing purposes, continue without authentication
-                        current_user = None
-                else:
-                    print("⚠️ No auth header provided, proceeding without authentication for testing")
-                    # Create a mock user for testing
-                    from src.database.core.models import User
-                    mock_user = User()
-                    mock_user.user_id = "test-user-id"
-                    mock_user.email = "test@example.com"
-                    mock_user.first_name = "Test"
-                    mock_user.last_name = "User"
-                    
-                    # Create a proper mock user object with all required attributes
-                    class MockUser:
-                        def __init__(self, user):
-                            self.user = user
-                            self.user_id = user.user_id
-                            self.session_id = "test-session-id"
-                    
-                    current_user = MockUser(mock_user)
-            except Exception as e:
-                print(f"❌ Auth setup failed: {e}")
-                # For testing purposes, continue without authentication
-                from src.database.core.models import User
-                mock_user = User()
-                mock_user.user_id = "test-user-id"
-                mock_user.email = "test@example.com"
-                mock_user.first_name = "Test"
-                mock_user.last_name = "User"
-                
-                class MockUser:
-                    def __init__(self, user):
-                        self.user = user
-                        self.user_id = user.user_id
-                        self.session_id = "test-session-id"
-                
-                current_user = MockUser(mock_user)
-            
-            print(f"🔥 CHAT API: Dependencies loaded, proceeding with LangGraph...")
+            print(f"🔥 CHAT API: Proceeding with LangGraph...")
 
             # --- LangGraph Invocation for complex messages ---
             # 1. Load existing conversation context or create new one
             
             session_manager = SessionManager()
+            user_id = str(current_user.user_id)
+            session_id = chat_request.session_id or current_user.session_id
             
             # Try to load existing conversation state
             existing_state = None
             try:
                 chat_session_data = await session_manager.get_chat_session(
-                    current_user.session_id, 
-                    str(current_user.user_id)
+                    session_id, 
+                    user_id
                 )
                 if chat_session_data and "conversation_state" in chat_session_data:
                     existing_state = chat_session_data["conversation_state"]
@@ -502,11 +644,10 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
             else:
                 # Create new conversation state
                 initial_message = HumanMessage(content=message_content)
-                user_full_name = f"{current_user.user.first_name} {current_user.user.last_name}" if current_user.user.first_name and current_user.user.last_name else current_user.user.first_name or current_user.user.last_name or current_user.user.email
                 initial_state = create_initial_state(
-                    user_id=str(current_user.user_id),
-                    session_id=current_user.session_id,
-                    user_name=user_full_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                    user_name=current_user.user.full_name or current_user.user.email,
                     user_role=current_user.role,
                     initial_message=initial_message
                 )
@@ -514,10 +655,18 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 # Add database to context
                 #initial_state["context"]["database"] = db
                 print(f"🔄 CHAT API: Created new conversation state")
+            
+            # Add file_info to context if provided
+            if hasattr(chat_request, 'file_info') and chat_request.file_info:
+                initial_state["context"]["file_info"] = chat_request.file_info
 
             # 🚀 PHASE 2 OPTIMIZATION: Reduced recursion limit to prevent multiple iterations
             # TODO: If agent responses become incomplete or tools don't execute properly, revert recursion_limit to 10
-            result = await agent_app.ainvoke(initial_state, config={"recursion_limit": 10})
+            print(f"🔍 DEBUG: Invoking agent with recursion_limit=20")
+            print(f"🔍 DEBUG: Initial state keys: {list(initial_state.keys())}")
+            print(f"🔍 DEBUG: Context keys: {list(initial_state.get('context', {}).keys())}")
+            result = await agent_app.ainvoke(initial_state, config={"recursion_limit": 20})
+            print(f"🔍 DEBUG: Agent invocation completed")
             
             # 3. Extract the response from the result
             response_content = "I'm processing your request..."
@@ -549,11 +698,21 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 print(f"⚠️ CHAT API: Failed to save conversation state: {save_error}")
                 # Don't fail the request if saving fails
 
+            # TODO: ERROR HANDLING - Check if response indicates an error
+            is_error = any(error_indicator in response_content for error_indicator in [
+                "❌ No employee found",
+                "❌ Invalid file data", 
+                "❌ User context not available",
+                "❌ Error",
+                "Failed to",
+                "Recursion limit"
+            ])
+            
             # 5. Return JSON response with "Milo" as agent name
             return ChatResponse(
                 response=response_content,
                 agent="Milo",
-                success=True,
+                success=not is_error,  # TODO: ERROR HANDLING - Set success based on error detection
                 timestamp=datetime.now().isoformat(),
                 session_id=current_user.session_id,
                 workflow_id=f"workflow_{datetime.now().timestamp()}",

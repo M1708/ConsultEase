@@ -8,15 +8,17 @@ import { useChatSession } from "@/hooks/useChatSession";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { TypewriterText } from "@/components/chat/TypewriterText";
 import { useAuthStore } from "@/store/authStore";
+import { ChatMessage } from "@/types/chat";
 import { Upload, Clock, FileText, X, User, Bot, Send } from "lucide-react";
 
 export default function ChatPage() {
   const router = useRouter();
   const { user, logout } = useAuth();
-  const { messages, isTyping, sendMessage, clearChat } = useChat();
+  const { messages, isTyping, sendMessage, clearChat, sessionId, setTyping, setMessages } = useChat();
   const { loadChatSession, saveChatSession } = useChatSession();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [inputMessage, setInputMessage] = useState("");
   const [redisStatus, setRedisStatus] = useState<
     "connected" | "disconnected" | "checking"
   >("checking");
@@ -31,8 +33,8 @@ export default function ChatPage() {
   });
   const [isDragging, setIsDragging] = useState(false);
   //const [isDraggingChat, setIsDraggingChat] = useState(false);
-  const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load chat session on mount (non-blocking)
   useEffect(() => {
@@ -179,51 +181,134 @@ export default function ChatPage() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('🚀 Frontend: handleSendMessage called', { selectedFile, inputMessage, isTyping });
     if ((!selectedFile && !inputMessage) || isTyping) return;
 
+    // TODO: INPUT CLEARING FIX - Clear input immediately when user hits enter
+    const messageToSend = inputMessage.trim();
+    const fileToSend = selectedFile;
+    
+    // Clear input immediately
+    setInputMessage("");
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    console.log('🧹 Frontend: Input cleared immediately when user hit enter');
+    
     try {
-      if (selectedFile) {
-        // Handle file upload
-        await handleFileUpload(selectedFile);
-      } else {
-        // Handle text message
-        if (inputMessage.trim()) {
-          const messageToSend = inputMessage.trim();
-          setInputMessage(""); // Clear input immediately for instant feedback
-          if (["hi", "hello", "hey"].includes(messageToSend.toLowerCase())) {
-            await sendMessage(
-              `${messageToSend} my name is ${user?.first_name}`,
-              messageToSend
-            );
-          } else {
-            await sendMessage(messageToSend);
-          }
-          // Auto-save after sending message
-          await saveChatSession();
+      if (fileToSend && messageToSend) {
+        console.log('🚀 Frontend: Calling sendMessageWithFile', { selectedFile: fileToSend.name, inputMessage: messageToSend });
+        // NEW: Send file with message to agentic endpoint
+        await sendMessageWithFile(fileToSend, messageToSend);
+      } else if (messageToSend) {
+        // Handle text-only message
+        if (["hi", "hello", "hey"].includes(messageToSend.toLowerCase())) {
+          await sendMessage(
+            `${messageToSend} my name is ${user?.first_name}`,
+            messageToSend
+          );
+        } else {
+          await sendMessage(messageToSend);
         }
       }
+      // Auto-save after sending message
+      await saveChatSession();
     } catch (error) {
       console.error("Failed to send message:", error);
     }
   };
 
-  const handleFileUpload = async (file: File) => {
-    setSelectedFile(file);
-
+  // NEW: Function for sending file with message to agentic endpoint
+  const sendMessageWithFile = async (file: File, message: string) => {
+    console.log('🚀 Frontend: sendMessageWithFile called', { file: file.name, message });
     try {
-      // Simulate file upload - replace with actual upload logic
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Add file message to chat
-      const fileMessage = `ðŸ“Ž Uploaded: ${file.name} (${(
-        file.size / 1024
-      ).toFixed(1)} KB)`;
-      await sendMessage(fileMessage);
-
-      setSelectedFile(null);
+      setTyping(true);
+      
+      // Add user message to chat immediately
+      const userMessage: ChatMessage = {
+        id: `user_${Date.now()}`,
+        message: `📎 ${file.name} - ${message}`,
+        response: "",
+        agent: "User",
+        success: true,
+        timestamp: new Date().toISOString(),
+        session_id: sessionId,
+        isUser: true,
+        data: {},
+      };
+      
+      setMessages(prev => [...prev, userMessage]);
+      
+      // Send to new agentic endpoint
+      const formData = new FormData();
+      formData.append('message', message);
+      formData.append('file', file);
+      formData.append('session_id', sessionId);
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const token = localStorage.getItem("supabase_token");
+      const response = await fetch(`${API_BASE_URL}/api/chat/message-with-file`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Backend error response:', errorText);
+        throw new Error(`Failed to send message with file: ${response.status} - ${errorText}`);
+      }
+      
+      const result = await response.json();
+      
+      // Check if the request was successful
+      if (!result.success) {
+        throw new Error(result.response || result.error || 'Request failed');
+      }
+      
+      // Add agent response to chat
+      const agentMessage: ChatMessage = {
+        id: `agent_${Date.now()}`,
+        message: message,
+        response: result.response,
+        agent: result.agent,
+        success: result.success,
+        timestamp: result.timestamp,
+        session_id: result.session_id,
+        workflow_id: result.workflow_id,
+        data: result.data,
+        isUser: false,
+      };
+      
+      setMessages(prev => [...prev, agentMessage]);
+      setTyping(false);
+      
     } catch (error) {
-      console.error("File upload failed:", error);
+      console.error("Failed to send message with file:", error);
+      setTyping(false);
+      // Add error message to chat
+      const errorMessage: ChatMessage = {
+        id: `error_${Date.now()}`,
+        message: `📎 ${file.name} - ${message}`,
+        response: `❌ Error: ${error instanceof Error ? error.message : 'Failed to process file'}`,
+        agent: "Error",
+        success: false,
+        timestamp: new Date().toISOString(),
+        session_id: sessionId,
+        isUser: false,
+        data: {},
+      };
+      setMessages(prev => [...prev, errorMessage]);
     }
+  };
+
+  // NEW: Handle file selection without immediate upload
+  const handleFileSelect = (file: File) => {
+    setSelectedFile(file);
+    // Don't upload immediately - wait for user message
   };
 
   const handleLogout = async () => {
@@ -540,26 +625,7 @@ export default function ChatPage() {
             {/* Chat Input Area */}
             <div className="bg-white border-t-2 border-blue-400 p-4 flex-shrink-0">
               <div className="max-w-4xl mx-auto">
-                {/* File Upload Area */}
-                {selectedFile && (
-                  <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm text-blue-800">
-                        {selectedFile.name}
-                      </span>
-                      <span className="text-xs text-blue-600">
-                        ({(selectedFile.size / 1024).toFixed(1)} KB)
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => setSelectedFile(null)}
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
+                {/* File Upload Area - Removed duplicate display */}
 
                 {/* Chat Input with File Upload */}
                 <form
@@ -571,16 +637,38 @@ export default function ChatPage() {
                     <label className="inline-flex items-center justify-center w-12 h-12 border-2 border-blue-600 rounded-full shadow-lg text-blue-600 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 cursor-pointer transition-all duration-200 transform hover:scale-110">
                       <Upload className="h-6 w-6" />
                       <input
+                        ref={fileInputRef}
                         type="file"
                         className="hidden"
                         accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) handleFileUpload(file);
+                          if (file) handleFileSelect(file);
                         }}
                       />
                     </label>
                   </div>
+
+                  {/* Selected File Display */}
+                  {selectedFile && (
+                    <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md border border-blue-200">
+                      <span className="text-sm text-blue-600 flex items-center gap-2">
+                        📎 {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+                      </span>
+                      <button
+                        onClick={() => {
+                          setSelectedFile(null);
+                          // Clear the file input to allow selecting the same file again
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = '';
+                          }
+                        }}
+                        className="text-red-500 hover:text-red-700 text-sm font-medium"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
 
                   {/* Chat Input */}
                   <div className="flex-1 flex space-x-3">
@@ -604,7 +692,7 @@ export default function ChatPage() {
                     />
                     <button
                       type="submit"
-                      disabled={!inputMessage?.trim() || isTyping}
+                      disabled={isTyping || (!inputMessage?.trim() && !selectedFile)}
                       className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors flex items-center space-x-2"
                       style={{ fontFamily: "Arial, sans-serif" }}
                     >

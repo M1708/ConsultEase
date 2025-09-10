@@ -1,232 +1,394 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, insert
-from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from sqlalchemy.orm import Session
+from typing import List
 from src.database.core.database import get_db
 from src.database.core.models import Employee, User
-from src.database.core.schemas import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeSearch
-from src.auth.dependencies import get_current_user
-from src.auth.dependencies import AuthenticatedUser
-from datetime import datetime
+from src.database.core.schemas import (
+    EmployeeCreate, 
+    EmployeeUpdate, 
+    EmployeeResponse, 
+    EmployeeDocumentUploadResponse,
+    EmployeeDocumentInfo,
+    EmployeeDocumentsResponse
+)
+from src.services.storage_service import SupabaseStorageService
+from src.auth.dependencies import get_current_user, AuthenticatedUser
+from sqlalchemy import select, or_, and_
+from sqlalchemy.sql import func
+import logging
 
-router = APIRouter(prefix="/employees", tags=["employees"])
+logger = logging.getLogger(__name__)
 
-async def get_employee_by_id(employee_id: int, session: AsyncSession) -> Optional[Employee]:
-    """Helper function to get employee by ID"""
-    result = await session.execute(select(Employee).filter(Employee.employee_id == employee_id))
-    return result.scalar_one_or_none()
-    #return db.query(Employee).filter(Employee.employee_id == employee_id).first()
+router = APIRouter()
 
-async def get_employee_by_number(employee_number: str, session: AsyncSession) -> Optional[Employee]:
-    """Helper function to get employee by employee number"""
-    result = await session.execute(select(Employee).filter(Employee.employee_number == employee_number))
-    return result.scalar_one_or_none()
-    
+# Employee Document Management Endpoints
 
-@router.post("/", response_model=EmployeeResponse)
-async def create_employee(
-    employee: EmployeeCreate,
-    session: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(get_current_user)
-):
-    """Create a new employee record"""
-    try:
-        # Check if employee number already exists
-        if employee.employee_number:
-            existing_employee = await get_employee_by_number(employee.employee_number, session)
-            if existing_employee:
-                raise HTTPException(status_code=400, detail="Employee number already exists")
-        
-        # Check if profile exists
-        chek = await session.execute(select(User).filter(User.user_id == employee.profile_id))
-        profile = chek.scalar_one_or_none()
-       # profile = db.query(User).filter(User.user_id == employee.profile_id).first()
-        if not profile:
-            raise HTTPException(status_code=404, detail="Profile not found")
-        
-        db_employee = Employee(
-            **employee.dict(),
-            created_by=current_user.user_id,
-            updated_by=current_user.user_id
-        )
-        
-        await session.add(db_employee)
-        await session.commit()
-        await session.refresh(db_employee)
-        
-        return db_employee
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create employee: {str(e)}")
-
-@router.get("/", response_model=List[EmployeeResponse])
-async def get_employees(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    department: Optional[str] = None,
-    employment_type: Optional[str] = None,
-    full_time_part_time: Optional[str] = None,
-    session: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(get_current_user)
-):
-    """Get all employees with optional filtering"""
-    try:
-        query = select(Employee)
-        
-        if department:
-            query = query.filter(Employee.department.ilike(f"%{department}%"))
-        if employment_type:
-            query = query.filter(Employee.employment_type == employment_type)
-        if full_time_part_time:
-            query = query.filter(Employee.full_time_part_time == full_time_part_time)
-        
-        #employees = query.offset(skip).limit(limit).all()
-        employees = await session.execute(query.offset(skip).limit(limit))
-        employees = employees.scalars().all()
-        return employees
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve employees: {str(e)}")
-
-@router.get("/search", response_model=List[EmployeeResponse])
-async def search_employees(
-    search_term: str = Query(..., min_length=1),
-    limit: int = Query(50, ge=1, le=100),
-    session: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(get_current_user)
-):
-    """Search employees by name, job title, department, or employee number"""
-    try:
-        temp = await session.execute(select(Employee).join(User, Employee.profile_id == User.user_id))
-        query = temp.scalars().all()
-        
-        # Search across multiple fields
-        search_filter = (
-            User.first_name.ilike(f"%{search_term}%") |
-            User.last_name.ilike(f"%{search_term}%") |
-            Employee.job_title.ilike(f"%{search_term}%") |
-            Employee.department.ilike(f"%{search_term}%") |
-            Employee.employee_number.ilike(f"%{search_term}%")
-        )
-        
-        #employees = query.filter(search_filter).limit(limit).all()
-        result = await session.execute(query.filter(search_filter).limit(limit))
-        employees = result.scalars().all()
-        return employees
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to search employees: {str(e)}")
-
-@router.get("/{employee_id}", response_model=EmployeeResponse)
-async def get_employee(
+@router.post("/{employee_id}/upload-nda", response_model=EmployeeDocumentUploadResponse)
+async def upload_employee_nda(
     employee_id: int,
-    db: AsyncSession = Depends(get_db),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
-    """Get a specific employee by ID"""
+    """Upload NDA document for employee with enhanced metadata tracking"""
     try:
-        employee = await get_employee_by_id(employee_id, db)
+        # Verify employee exists
+        employee = db.query(Employee).filter(Employee.employee_id == employee_id).first()
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        return employee
+        # Validate file type
+        allowed_types = [
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'image/jpeg',
+            'image/jpg',
+            'image/png'
+        ]
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400, 
+                detail="Only PDF, DOC, DOCX, JPG, and PNG files are allowed for NDA documents"
+            )
         
-    except HTTPException:
-        raise
+        # Validate file size (max 10MB)
+        file_content = await file.read()
+        if len(file_content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB")
+        
+        # Reset file pointer
+        await file.seek(0)
+        
+        # Upload to Supabase Storage
+        storage_service = SupabaseStorageService()
+        upload_result = await storage_service.upload_employee_nda_document(file, employee_id)
+        
+        if upload_result["success"]:
+            # Update employee record with NDA document info
+            employee.nda_document_bucket_name = "employee-nda-documents"
+            employee.nda_document_file_size = upload_result["file_size"]
+            employee.nda_document_mime_type = upload_result["mime_type"]
+            employee.nda_document_uploaded_at = upload_result["uploaded_at"]
+            # Keep legacy field for backward compatibility
+            employee.nda_file_link = upload_result["file_path"]
+            employee.updated_by = current_user.user_id
+            employee.updated_at = func.now()
+            
+            db.commit()
+            db.refresh(employee)
+            
+            return EmployeeDocumentUploadResponse(
+                success=True,
+                message=f"NDA document uploaded successfully for employee {employee_id}",
+                document_type="nda",
+                document_filename=upload_result["filename"],
+                document_file_path=upload_result["file_path"],
+                file_size=upload_result["file_size"],
+                uploaded_at=upload_result["uploaded_at"]
+            )
+        else:
+            raise HTTPException(status_code=500, detail="NDA upload failed")
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve employee: {str(e)}")
+        logger.error(f"NDA upload failed for employee {employee_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"NDA upload failed: {str(e)}")
 
-@router.put("/{employee_id}", response_model=EmployeeResponse)
-async def update_employee(
+@router.post("/{employee_id}/upload-contract", response_model=EmployeeDocumentUploadResponse)
+async def upload_employee_contract(
     employee_id: int,
-    employee_update: EmployeeUpdate,
-    db: AsyncSession = Depends(get_db),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
-    """Update an existing employee"""
+    """Upload contract document for employee with enhanced metadata tracking"""
     try:
-        db_employee = await get_employee_by_id(employee_id, db)
-        if not db_employee:
+        # Verify employee exists
+        employee = db.query(Employee).filter(Employee.employee_id == employee_id).first()
+        if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        # Check if employee number already exists (if being updated)
-        if employee_update.employee_number and employee_update.employee_number != db_employee.employee_number:
-            existing_employee = await get_employee_by_number(employee_update.employee_number, db)
-            if existing_employee:
-                raise HTTPException(status_code=400, detail="Employee number already exists")
+        # Validate file type
+        allowed_types = [
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'image/jpeg',
+            'image/jpg',
+            'image/png'
+        ]
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400, 
+                detail="Only PDF, DOC, DOCX, JPG, and PNG files are allowed for contract documents"
+            )
         
-        # Update fields
-        update_data = employee_update.dict(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(db_employee, field, value)
+        # Validate file size (max 10MB)
+        file_content = await file.read()
+        if len(file_content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB")
         
-        db_employee.updated_by = current_user.user_id
-        db_employee.updated_at = datetime.utcnow()
+        # Reset file pointer
+        await file.seek(0)
         
-        await db.commit()
-        await db.refresh(db_employee)
+        # Upload to Supabase Storage
+        storage_service = SupabaseStorageService()
+        upload_result = await storage_service.upload_employee_contract_document(file, employee_id)
         
-        return db_employee
-        
-    except HTTPException:
-        raise
+        if upload_result["success"]:
+            # Update employee record with contract document info
+            employee.contract_document_bucket_name = "employee-contract-documents"
+            employee.contract_document_file_size = upload_result["file_size"]
+            employee.contract_document_mime_type = upload_result["mime_type"]
+            employee.contract_document_uploaded_at = upload_result["uploaded_at"]
+            # Keep legacy field for backward compatibility
+            employee.contract_file_link = upload_result["file_path"]
+            employee.updated_by = current_user.user_id
+            employee.updated_at = func.now()
+            
+            db.commit()
+            db.refresh(employee)
+            
+            return EmployeeDocumentUploadResponse(
+                success=True,
+                message=f"Contract document uploaded successfully for employee {employee_id}",
+                document_type="contract",
+                document_filename=upload_result["filename"],
+                document_file_path=upload_result["file_path"],
+                file_size=upload_result["file_size"],
+                uploaded_at=upload_result["uploaded_at"]
+            )
+        else:
+            raise HTTPException(status_code=500, detail="Contract upload failed")
+            
     except Exception as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update employee: {str(e)}")
+        logger.error(f"Contract upload failed for employee {employee_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Contract upload failed: {str(e)}")
 
-@router.delete("/{employee_id}")
-async def delete_employee(
+@router.delete("/{employee_id}/nda")
+async def delete_employee_nda(
     employee_id: int,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
-    """Delete an employee record"""
+    """Delete NDA document for employee"""
     try:
-        db_employee = await get_employee_by_id(employee_id, db)
-        if not db_employee:
+        # Verify employee exists
+        employee = db.query(Employee).filter(Employee.employee_id == employee_id).first()
+        if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        await db.delete(db_employee)
-        await db.commit()
+        if not employee.nda_file_link:
+            raise HTTPException(status_code=404, detail="No NDA document found for this employee")
         
-        return {"message": "Employee deleted successfully"}
+        # Delete from storage
+        storage_service = SupabaseStorageService()
+        delete_success = await storage_service.delete_employee_nda_document(employee.nda_file_link)
         
-    except HTTPException:
-        raise
+        if delete_success:
+            # Clear document fields
+            employee.nda_file_link = None
+            employee.nda_document_bucket_name = None
+            employee.nda_document_file_size = None
+            employee.nda_document_mime_type = None
+            employee.nda_document_uploaded_at = None
+            employee.nda_ocr_extracted_data = None
+            employee.updated_by = current_user.user_id
+            employee.updated_at = func.now()
+            
+            db.commit()
+            
+            return {"success": True, "message": f"NDA document deleted successfully for employee {employee_id}"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete NDA document from storage")
+            
     except Exception as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete employee: {str(e)}")
+        logger.error(f"NDA deletion failed for employee {employee_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"NDA deletion failed: {str(e)}")
 
-@router.get("/department/{department}", response_model=List[EmployeeResponse])
-async def get_employees_by_department(
-    department: str,
-    db: AsyncSession = Depends(get_db),
+@router.delete("/{employee_id}/contract")
+async def delete_employee_contract(
+    employee_id: int,
+    db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
-    """Get all employees in a specific department"""
+    """Delete contract document for employee"""
     try:
-        result = await db.execute(select(Employee).filter(Employee.department.ilike(f"%{department}%")))
-        employees = result.scalars().all()
-        return employees
+        # Verify employee exists
+        employee = db.query(Employee).filter(Employee.employee_id == employee_id).first()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
         
+        if not employee.contract_file_link:
+            raise HTTPException(status_code=404, detail="No contract document found for this employee")
+        
+        # Delete from storage
+        storage_service = SupabaseStorageService()
+        delete_success = await storage_service.delete_employee_contract_document(employee.contract_file_link)
+        
+        if delete_success:
+            # Clear document fields
+            employee.contract_file_link = None
+            employee.contract_document_bucket_name = None
+            employee.contract_document_file_size = None
+            employee.contract_document_mime_type = None
+            employee.contract_document_uploaded_at = None
+            employee.contract_ocr_extracted_data = None
+            employee.updated_by = current_user.user_id
+            employee.updated_at = func.now()
+            
+            db.commit()
+            
+            return {"success": True, "message": f"Contract document deleted successfully for employee {employee_id}"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete contract document from storage")
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve employees by department: {str(e)}")
+        logger.error(f"Contract deletion failed for employee {employee_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Contract deletion failed: {str(e)}")
 
-@router.get("/employment-type/{employment_type}", response_model=List[EmployeeResponse])
-async def get_employees_by_employment_type(
-    employment_type: str,
-    db: AsyncSession = Depends(get_db),
+@router.get("/{employee_id}/documents", response_model=EmployeeDocumentsResponse)
+async def get_employee_documents(
+    employee_id: int,
+    db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
-    """Get all employees by employment type"""
+    """Get all document information for employee with download URLs"""
     try:
-        result = await db.execute(select(Employee).filter(Employee.employment_type == employment_type))
-        employees = result.scalars().all()
-        #employees = db.query(Employee).filter(Employee.employment_type == employment_type).all()
-        return employees
+        # Verify employee exists
+        employee = db.query(Employee).filter(Employee.employee_id == employee_id).first()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        # Get employee name
+        profile = db.query(User).filter(User.user_id == employee.profile_id).first()
+        employee_name = f"{profile.first_name} {profile.last_name}" if profile else "Unknown"
+        
+        storage_service = SupabaseStorageService()
+        
+        # Build NDA document info
+        nda_document = None
+        if employee.nda_file_link:
+            download_url = storage_service.get_employee_nda_document_url(employee.nda_file_link)
+            nda_document = EmployeeDocumentInfo(
+                document_type="nda",
+                filename=employee.nda_document_mime_type.split('/')[-1] if employee.nda_document_mime_type else None,
+                file_path=employee.nda_file_link,
+                file_size=employee.nda_document_file_size,
+                mime_type=employee.nda_document_mime_type,
+                uploaded_at=employee.nda_document_uploaded_at,
+                has_document=True,
+                download_url=download_url,
+                ocr_extracted_data=employee.nda_ocr_extracted_data
+            )
+        else:
+            nda_document = EmployeeDocumentInfo(
+                document_type="nda",
+                has_document=False
+            )
+        
+        # Build contract document info
+        contract_document = None
+        if employee.contract_file_link:
+            download_url = storage_service.get_employee_contract_document_url(employee.contract_file_link)
+            contract_document = EmployeeDocumentInfo(
+                document_type="contract",
+                filename=employee.contract_document_mime_type.split('/')[-1] if employee.contract_document_mime_type else None,
+                file_path=employee.contract_file_link,
+                file_size=employee.contract_document_file_size,
+                mime_type=employee.contract_document_mime_type,
+                uploaded_at=employee.contract_document_uploaded_at,
+                has_document=True,
+                download_url=download_url,
+                ocr_extracted_data=employee.contract_ocr_extracted_data
+            )
+        else:
+            contract_document = EmployeeDocumentInfo(
+                document_type="contract",
+                has_document=False
+            )
+        
+        return EmployeeDocumentsResponse(
+            employee_id=employee_id,
+            employee_name=employee_name,
+            nda_document=nda_document,
+            contract_document=contract_document
+        )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve employees by employment type: {str(e)}")
+        logger.error(f"Failed to get documents for employee {employee_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get employee documents: {str(e)}")
+
+@router.get("/{employee_id}/nda")
+async def get_employee_nda(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """Get NDA document download URL for employee"""
+    try:
+        # Verify employee exists
+        employee = db.query(Employee).filter(Employee.employee_id == employee_id).first()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        if not employee.nda_file_link:
+            raise HTTPException(status_code=404, detail="No NDA document found for this employee")
+        
+        # Get download URL
+        storage_service = SupabaseStorageService()
+        download_url = storage_service.get_employee_nda_document_url(employee.nda_file_link)
+        
+        if not download_url:
+            raise HTTPException(status_code=500, detail="Failed to generate download URL")
+        
+        return {
+            "success": True,
+            "employee_id": employee_id,
+            "document_type": "nda",
+            "download_url": download_url,
+            "filename": employee.nda_document_mime_type.split('/')[-1] if employee.nda_document_mime_type else "nda_document",
+            "file_size": employee.nda_document_file_size,
+            "uploaded_at": employee.nda_document_uploaded_at
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get NDA for employee {employee_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get NDA document: {str(e)}")
+
+@router.get("/{employee_id}/contract")
+async def get_employee_contract(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """Get contract document download URL for employee"""
+    try:
+        # Verify employee exists
+        employee = db.query(Employee).filter(Employee.employee_id == employee_id).first()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        if not employee.contract_file_link:
+            raise HTTPException(status_code=404, detail="No contract document found for this employee")
+        
+        # Get download URL
+        storage_service = SupabaseStorageService()
+        download_url = storage_service.get_employee_contract_document_url(employee.contract_file_link)
+        
+        if not download_url:
+            raise HTTPException(status_code=500, detail="Failed to generate download URL")
+        
+        return {
+            "success": True,
+            "employee_id": employee_id,
+            "document_type": "contract",
+            "download_url": download_url,
+            "filename": employee.contract_document_mime_type.split('/')[-1] if employee.contract_document_mime_type else "contract_document",
+            "file_size": employee.contract_document_file_size,
+            "uploaded_at": employee.contract_document_uploaded_at
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get contract for employee {employee_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get contract document: {str(e)}")

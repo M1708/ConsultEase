@@ -74,6 +74,11 @@ class EnhancedAgentNodeExecutor:
         """
         start_time = time.perf_counter()
         
+        # Track invocations to debug recursion
+        if not hasattr(self, '_invocation_count'):
+            self._invocation_count = 0
+        self._invocation_count += 1
+        print(f"🔍 DEBUG: {agent_name} invocation #{self._invocation_count}")
         
         try:
             # 🚀 PERFORMANCE OPTIMIZATION: Track agent execution for contract search optimization
@@ -93,6 +98,18 @@ class EnhancedAgentNodeExecutor:
             )
             
             print(f"🚀 Invoking {agent_name} with Phase 2 dynamic context...")
+            print(f"🔍 DEBUG: Message count: {len(state.get('messages', []))}")
+            last_msg = state.get('messages', [])[-1] if state.get('messages') else None
+            if last_msg:
+                if hasattr(last_msg, 'content'):
+                    print(f"🔍 DEBUG: Last message: {last_msg.content}")
+                elif isinstance(last_msg, dict):
+                    print(f"🔍 DEBUG: Last message: {last_msg.get('content', str(last_msg))}")
+                else:
+                    print(f"🔍 DEBUG: Last message: {str(last_msg)}")
+            else:
+                print(f"🔍 DEBUG: Last message: No messages")
+            print(f"🔍 DEBUG: Context keys: {list(state.get('context', {}).keys()) if state.get('context') else 'No context'}")
             
             # Prepare messages with optimized structure
             prepared_messages = await self._prepare_messages_optimized(
@@ -106,6 +123,14 @@ class EnhancedAgentNodeExecutor:
             )
             
             response_message = response.choices[0].message
+            
+            # TODO: DEBUG - Debug tool calls to track recursion issue
+            if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
+                print(f"🔍 DEBUG: Agent made {len(response_message.tool_calls)} tool calls:")
+                for i, tool_call in enumerate(response_message.tool_calls):
+                    print(f"🔍 DEBUG: Tool call {i}: {tool_call.function.name} with args: {tool_call.function.arguments}")
+            else:
+                print(f"🔍 DEBUG: Agent made no tool calls, response: {response_message.content[:100]}...")
             
             # Update performance tracking
             processing_time = time.perf_counter() - start_time
@@ -224,20 +249,118 @@ class EnhancedAgentNodeExecutor:
     ) -> List[Dict[str, str]]:
         """Prepare messages with performance optimizations."""
         
+        # Build system prompt with context information
+        full_system_prompt = system_prompt
+        
+        # Add context information if available
+        if 'context' in state and state['context']:
+            context_info = []
+            if 'file_info' in state['context']:
+                file_info = state['context']['file_info']
+                context_info.append(f"File attached: {file_info.get('filename', 'unknown')} ({file_info.get('file_size', 0)} bytes)")
+                context_info.append(f"File type: {file_info.get('mime_type', 'unknown')}")
+                context_info.append(f"File data available: {'Yes' if file_info.get('file_data') else 'No'}")
+                
+                # CRITICAL: Include the actual file data for the agent to use
+                if file_info.get('file_data'):
+                    context_info.append(f"ACTUAL_FILE_DATA: {file_info.get('file_data')}")
+                    context_info.append(f"ACTUAL_FILENAME: {file_info.get('filename')}")
+                    context_info.append(f"ACTUAL_FILE_SIZE: {file_info.get('file_size')}")
+                    context_info.append(f"ACTUAL_MIME_TYPE: {file_info.get('mime_type')}")
+                
+                print(f"🔍 DEBUG: File info in context: {file_info.get('filename')}")
+                print(f"🔍 DEBUG: File data length in context: {len(file_info.get('file_data', ''))}")
+            
+            if context_info:
+                context_message = "\n\nContext information:\n" + "\n".join(context_info)
+                full_system_prompt += context_message
+        
         prepared_messages = [
-            {"role": "system", "content": system_prompt}
+            {"role": "system", "content": full_system_prompt}
         ]
         
         messages = state['messages']
         
-        # Optimize message processing
-        for msg in messages:
+        # CRITICAL FIX: We need to preserve the original user message that contains employee names
+        # The issue is that we're only seeing tool call messages, but we need the original user input
+        
+        # First, check if we have the original user message in the context
+        original_user_message = None
+        if 'context' in state and 'original_message' in state['context']:
+            original_user_message = state['context']['original_message']
+            print(f"🔍 DEBUG: Found original message in context: {original_user_message[:100]}...")
+        
+        # If we have an original user message, include it first
+        if original_user_message:
+            prepared_messages.append({"role": "user", "content": original_user_message})
+            print(f"🔍 DEBUG: Added original user message: {original_user_message[:100]}...")
+        
+        # Process messages and ensure we capture both user messages and tool results
+        print(f"🔍 DEBUG: Processing {len(messages)} messages")
+        for i, msg in enumerate(messages):
+            print(f"🔍 DEBUG: Raw message {i}: type={type(msg)}, hasattr(type)={hasattr(msg, 'type')}, hasattr(content)={hasattr(msg, 'content')}")
             if hasattr(msg, 'type') and hasattr(msg, 'content'):
-                role = 'user' if msg.type == 'human' else msg.type
-                prepared_messages.append({"role": role, "content": msg.content})
+                # Map message types to OpenAI roles
+                if msg.type == 'human':
+                    role = 'user'
+                    prepared_messages.append({"role": role, "content": msg.content})
+                    print(f"🔍 DEBUG: Message {i}: {role} - {msg.content[:100]}...")
+                elif msg.type == 'ai':
+                    role = 'assistant'
+                    prepared_messages.append({"role": role, "content": msg.content})
+                    print(f"🔍 DEBUG: Message {i}: {role} - {msg.content[:100]}...")
+                elif msg.type == 'tool':
+                    # Skip tool messages to avoid malformed structure
+                    print(f"🔍 DEBUG: Skipping tool message {i}")
+                    continue
+                else:
+                    role = msg.type
+                    prepared_messages.append({"role": role, "content": msg.content})
+                    print(f"🔍 DEBUG: Message {i}: {role} - {msg.content[:100]}...")
+            elif isinstance(msg, dict):
+                # Handle dictionary messages
+                print(f"🔍 DEBUG: Dict message {i}: keys={list(msg.keys())}")
+                
+                # Check if this is a tool result (has success/message structure)
+                if 'success' in msg and 'message' in msg:
+                    # This is a tool result - include it as a user message so agent can see the result
+                    content = f"Previous tool result: {msg.get('message', str(msg))}"
+                    prepared_messages.append({"role": "user", "content": content})
+                    print(f"🔍 DEBUG: Message {i}: user (tool result) - {content[:100]}...")
+                # Check if this is an OpenAI tool call message (has tool_call_id, role, name)
+                elif 'tool_call_id' in msg and 'role' in msg and 'name' in msg:
+                    # This is an OpenAI tool call result - include the content as a tool result
+                    content = msg.get('content', str(msg))
+                    if content and content.strip():
+                        tool_result_content = f"Tool '{msg.get('name', 'unknown')}' result: {content}"
+                        prepared_messages.append({"role": "user", "content": tool_result_content})
+                        print(f"🔍 DEBUG: Message {i}: user (OpenAI tool result) - {tool_result_content[:100]}...")
+                    else:
+                        print(f"🔍 DEBUG: Skipping empty OpenAI tool message {i}")
+                else:
+                    # Regular dictionary message
+                    role = msg.get('role', 'user')
+                    content = msg.get('content', str(msg))
+                    # Skip tool messages to avoid malformed structure
+                    if role != 'tool':
+                        prepared_messages.append({"role": role, "content": content})
+                        print(f"🔍 DEBUG: Message {i}: {role} - {content[:100]}...")
+                    else:
+                        print(f"🔍 DEBUG: Skipping tool message {i}")
             else:
-                # Optimized fallback
+                # Fallback for other message types - treat as user message
                 prepared_messages.append({"role": "user", "content": str(msg)})
+                print(f"🔍 DEBUG: Message {i}: user (fallback) - {str(msg)[:100]}...")
+        
+        print(f"🔍 DEBUG: Final prepared messages count: {len(prepared_messages)}")
+        print(f"🔍 DEBUG: System prompt preview: {full_system_prompt[:200]}...")
+        # Show actual user messages
+        user_messages = [msg for msg in prepared_messages if msg.get('role') == 'user']
+        if user_messages:
+            print(f"🔍 DEBUG: Found {len(user_messages)} user messages")
+            print(f"🔍 DEBUG: Last user message content: {user_messages[-1]['content'][:200]}...")
+        else:
+            print(f"🔍 DEBUG: No user messages found in prepared_messages")
         
         return prepared_messages
     

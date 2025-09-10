@@ -4,6 +4,7 @@ from sqlalchemy import select, or_, and_, func
 from sqlalchemy.exc import IntegrityError
 import re
 import calendar
+import string
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel
@@ -13,7 +14,11 @@ from src.database.core.schemas import EmployeeCreate, EmployeeUpdate
 from datetime import datetime, date
 from decimal import Decimal
 from datetime import datetime
-
+# Import storage service to get download URL
+from src.services.storage_service import SupabaseStorageService
+import base64
+from io import BytesIO
+                
 # Import caching functionality
 from ..performance.cache_decorators import (
     cached_employee_operation,
@@ -163,6 +168,17 @@ def _get_specific_month_range(year, month):
     last_day = calendar.monthrange(year, month)[1]
     end_date = datetime(year, month, last_day).date()
     return start_date, end_date
+
+def format_file_size(size_bytes):
+    """Convert bytes to human readable format"""
+    if size_bytes == 0:
+        return "0 B"
+    size_names = ["B", "KB", "MB", "GB"]
+    i = 0
+    while size_bytes >= 1024 and i < len(size_names) - 1:
+        size_bytes /= 1024.0
+        i += 1
+    return f"{size_bytes:.1f} {size_names[i]}"
 
 @cached_employee_operation(cache_ttl=180, invalidate_on_update=True, track_performance=True)
 async def check_employee_exists_tool(profile_id: str) -> EmployeeToolResult:
@@ -417,15 +433,14 @@ async def search_profiles_by_name_tool(search_name: str) -> EmployeeToolResult:
                 first_name = name_parts[0]
                 last_name = name_parts[-1]
                 
-                # Build search conditions more efficiently
+                # Build search conditions more efficiently - PgBouncer compatible
                 conditions = [
                     # Exact first + last name match (highest priority)
                     and_(
                         User.first_name.ilike(f"%{first_name}%"),
                         User.last_name.ilike(f"%{last_name}%")
-                    ),
-                    # Full name contains the search term
-                    func.concat(User.first_name, ' ', User.last_name).ilike(f"%{cleaned_name}%")
+                    )
+                    # Remove func.concat to avoid PgBouncer prepared statement issues
                 ]
                 
                 # Add individual name matches only if they're different from the full name search
@@ -1419,4 +1434,615 @@ async def delete_employee_tool(params: DeleteEmployeeParams, context: Dict[str, 
         return EmployeeToolResult(
             success=False,
             message=f"❌ Failed to delete employee: {str(e)}"
+        )
+
+
+# Add these new parameter classes after the existing parameter classes (around line 85):
+
+class UploadEmployeeDocumentParams(BaseModel):
+    """Parameters for uploading employee documents with file data"""
+    employee_id: Optional[int] = None
+    employee_name: Optional[str] = None
+    document_type: str  # "nda" or "contract"
+    file_data: str  # Base64 encoded file content
+    filename: str
+    file_size: int
+    mime_type: str
+
+class DeleteEmployeeDocumentParams(BaseModel):
+    """Parameters for deleting employee documents"""
+    employee_id: Optional[int] = None
+    employee_name: Optional[str] = None
+    document_type: str  # "nda" or "contract"
+
+class GetEmployeeDocumentParams(BaseModel):
+    """Parameters for getting employee document information"""
+    employee_id: Optional[int] = None
+    employee_name: Optional[str] = None
+    document_type: str  # "nda" or "contract"
+
+# Add these new tool functions at the end of the file (before the last function):
+@cached_employee_operation(cache_ttl=300, invalidate_on_update=True, track_performance=True)
+async def upload_employee_document_tool(params: UploadEmployeeDocumentParams, context: Dict[str, Any] = None) -> EmployeeToolResult:
+    """Tool for uploading NDA or contract documents for employees with file handling"""
+    try:
+        print(f"🔍 DEBUG: upload_employee_document_tool called with employee_name='{params.employee_name}', document_type='{params.document_type}'")
+        print(f"🔍 DEBUG: Tool params: {params}")
+        # Add this right after the function starts, around line 1458:
+        print(f"🔍 DEBUG: File_data type: {type(params.file_data)}")
+        print(f"🔍 DEBUG: File_data length: {len(params.file_data)}")   
+        
+        # Validate that employee_name is not a filename (common error pattern)
+        if params.employee_name and ('.' in params.employee_name and len(params.employee_name.split('.')) == 2):
+            # This looks like a filename (e.g., "PRD.docx")
+            file_extensions = ['.pdf', '.docx', '.doc', '.txt', '.png', '.jpg', '.jpeg']
+            if any(params.employee_name.lower().endswith(ext) for ext in file_extensions):
+                return EmployeeToolResult(
+                    success=False,
+                    message=f"❌ Error: '{params.employee_name}' appears to be a filename, not an employee name. Please extract the actual employee name from the user's message. For example, if the user said 'this nda document is for employee Steve York', the employee name should be 'Steve York', not the filename."
+                )
+        
+        async with get_ai_db() as session:
+            # Extract user_id from context
+            if not context or 'user_id' not in context:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ User context not available. Please ensure you're authenticated."
+                )
+            
+            user_id = context['user_id']
+            
+            # Find employee by ID or name with proper error handling to prevent recursion
+            employee = None
+            if params.employee_id:
+                result = await session.execute(select(Employee).filter(Employee.employee_id == params.employee_id))
+                employee = result.scalar_one_or_none()
+                if not employee:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee found with ID {params.employee_id}. Please check the employee ID and try again."
+                    )
+            elif params.employee_name:
+                # Search for employee by name through profile lookup
+                cleaned_name = params.employee_name.strip()
+                name_conditions = [
+                    User.first_name.ilike(f"%{cleaned_name}%"),
+                    User.last_name.ilike(f"%{cleaned_name}%")
+                ]
+                
+                if ' ' in cleaned_name:
+                    name_parts = cleaned_name.split()
+                    if len(name_parts) >= 2:
+                        name_conditions.extend([
+                            and_(
+                                User.first_name.ilike(f"%{name_parts[0]}%"),
+                                User.last_name.ilike(f"%{name_parts[-1]}%")
+                            )
+                        ])
+                
+                profile_result = await session.execute(select(User).filter(or_(*name_conditions)))
+                profiles = profile_result.scalars().all()
+                
+                if not profiles:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee found with name '{params.employee_name}'. Please check the employee name and ensure they have a profile in the system."
+                    )
+                
+                if len(profiles) > 1:
+                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Multiple employees found with name '{params.employee_name}': {', '.join(profile_names)}. Please be more specific with the employee name."
+                    )
+                
+                # Find employee record for the matched profile
+                profile_id = str(profiles[0].user_id)
+                result = await session.execute(select(Employee).filter(Employee.profile_id == profile_id))
+                employee = result.scalar_one_or_none()
+                
+                if not employee:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee record found for '{params.employee_name}'. The profile exists but no employee record has been created. Please create an employee record first."
+                    )
+            else:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Either employee_id or employee_name must be provided for document upload."
+                )
+            
+            # Final check to ensure employee was found (prevents recursion)
+            if not employee:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Employee not found. Please verify the employee information and try again."
+                )
+            
+            # Handle file upload if file_data is provided
+            if params.file_data:
+                
+                storage_service = SupabaseStorageService()
+                
+                # Validate and decode base64 file data
+                try:
+                    # Check if file_data is a valid base64 string
+                    if not params.file_data or len(params.file_data) < 10:
+                        return EmployeeToolResult(
+                            success=False,
+                            message="❌ File data is empty or too short. Please ensure the file was properly uploaded."
+                        )
+                    
+                    # Remove any data URL prefix if present (e.g., "data:application/pdf;base64,")
+                    file_data_clean = params.file_data
+                    if file_data_clean.startswith('data:'):
+                        # Split on comma and take the base64 part
+                        parts = file_data_clean.split(',', 1)
+                        if len(parts) == 2:
+                            file_data_clean = parts[1]
+                        else:
+                            return EmployeeToolResult(
+                                success=False,
+                                message="❌ Invalid data URL format in file data."
+                            )
+                    
+                    # Clean up base64 string - remove all whitespace and newlines
+                    file_data_clean = ''.join(file_data_clean.split())
+                    
+                    # Enhanced validation and debugging
+                    print(f"🔍 DEBUG: File data length: {len(file_data_clean)}")
+                    print(f"🔍 DEBUG: Expected file size: {params.file_size}")
+                    
+                    # Validate base64 string length and characters
+                    if len(file_data_clean) < 4:
+                        return EmployeeToolResult(
+                            success=False,
+                            message="❌ Base64 data too short. Please ensure the complete file data is provided."
+                        )
+                    
+                    # Check for valid base64 characters
+                    
+                    valid_chars = string.ascii_letters + string.digits + '+/='
+                    invalid_chars = [c for c in file_data_clean if c not in valid_chars]
+                    if invalid_chars:
+                        print(f"🔍 DEBUG: Invalid base64 characters found: {set(invalid_chars)}")
+                        # Try to clean the string
+                        file_data_clean = ''.join(c for c in file_data_clean if c in valid_chars)
+                        print(f"🔍 DEBUG: Cleaned data length: {len(file_data_clean)}")
+                    
+                    # Add proper padding if missing
+                    missing_padding = len(file_data_clean) % 4
+                    if missing_padding:
+                        file_data_clean += '=' * (4 - missing_padding)
+                        print(f"🔍 DEBUG: Added {4 - missing_padding} padding characters")
+                    
+                    # Try multiple decoding approaches
+                    file_content = None
+                    decode_attempts = [
+                        ("Standard base64 without validation", lambda: base64.b64decode(file_data_clean, validate=False)),
+                        ("URL-safe base64", lambda: base64.urlsafe_b64decode(file_data_clean)),
+                        ("Standard base64 with validation", lambda: base64.b64decode(file_data_clean, validate=True)),
+                    ]
+                    
+                    for attempt_name, decode_func in decode_attempts:
+                        try:
+                            print(f"🔍 DEBUG: Trying {attempt_name} decoding...")
+                            file_content = decode_func()
+                            print(f"🔍 DEBUG: {attempt_name} decoding successful! Decoded {len(file_content)} bytes")
+                            break
+                        except Exception as e:
+                            print(f"🔍 DEBUG: {attempt_name} failed: {str(e)}")
+                            continue
+                    
+                    if file_content is None:
+                        return EmployeeToolResult(
+                            success=False,
+                            message="❌ Failed to decode base64 data with all attempted methods. Please ensure the file data is properly base64 encoded."
+                        )
+                    
+                    # Validate file size matches
+                    if len(file_content) != params.file_size:
+                        print(f"🔍 DEBUG: File size mismatch - decoded: {len(file_content)}, expected: {params.file_size}")
+                        # Don't fail on size mismatch, just log it as the frontend might calculate differently
+                    
+                    print(f"🔍 DEBUG: Successfully decoded {len(file_content)} bytes of file data")
+                    
+                except Exception as e:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Failed to decode file data: {str(e)}. Please ensure the file is properly base64 encoded."
+                    )
+                
+                # Create a temporary file-like object
+                file_obj = BytesIO(file_content)
+                file_obj.name = params.filename
+                
+                # Upload to storage
+                if params.document_type == "nda":
+                    upload_result = await storage_service.upload_employee_nda_document(file_obj, employee.employee_id)
+                elif params.document_type == "contract":
+                    upload_result = await storage_service.upload_employee_contract_document(file_obj, employee.employee_id)
+                else:
+                    return EmployeeToolResult(
+                        success=False,
+                        message="❌ Invalid document type. Must be 'nda' or 'contract'."
+                    )
+                
+                if not upload_result["success"]:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Failed to upload {params.document_type} document to storage"
+                    )
+                
+                # Update employee record with upload result
+                file_path = upload_result["file_path"]
+                file_size = upload_result["file_size"]
+                uploaded_at = upload_result["uploaded_at"]
+            else:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ No file data provided for upload"
+                )
+            
+            # Update employee record with document metadata
+            if params.document_type == "nda":
+                employee.nda_document_bucket_name = "employee-nda-documents"
+                employee.nda_document_file_size = file_size
+                employee.nda_document_mime_type = params.mime_type
+                employee.nda_document_uploaded_at = uploaded_at
+                employee.nda_file_link = file_path  # Keep legacy field
+                # Update new metadata fields
+                employee.nda_document_filename = params.filename
+                employee.nda_document_file_path = file_path
+            elif params.document_type == "contract":
+                employee.contract_document_bucket_name = "employee-contract-documents"
+                employee.contract_document_file_size = file_size
+                employee.contract_document_mime_type = params.mime_type
+                employee.contract_document_uploaded_at = uploaded_at
+                employee.contract_file_link = file_path  # Keep legacy field
+                # Update new metadata fields
+                employee.contract_document_filename = params.filename
+                employee.contract_document_file_path = file_path
+            
+            employee.updated_by = user_id
+            employee.updated_at = datetime.utcnow()
+            
+            await session.commit()
+            await session.refresh(employee)
+            
+            # Get employee name for response
+            profile_result = await session.execute(select(User).filter(User.user_id == employee.profile_id))
+            profile = profile_result.scalar_one_or_none()
+            employee_name = f"{profile.first_name} {profile.last_name}" if profile else "Unknown"
+            
+            # Get download URL
+            download_url = ""
+            if params.document_type == "nda":
+                download_url = storage_service.get_employee_nda_document_url(file_path)
+            elif params.document_type == "contract":
+                download_url = storage_service.get_employee_contract_document_url(file_path)
+            
+            return EmployeeToolResult(
+                success=True,
+                message=f"✅ {params.document_type.upper()} document uploaded successfully for {employee_name}\n📄 File: [{params.filename}]({download_url}) ({format_file_size(file_size)})",
+                data={
+                    "employee_id": employee.employee_id,
+                    "employee_name": employee_name,
+                    "document_type": params.document_type,
+                    "filename": params.filename,
+                    "file_path": file_path,
+                    "file_size": file_size,
+                    "mime_type": params.mime_type,
+                    "uploaded_at": uploaded_at.isoformat() if uploaded_at else None,
+                    "download_url": download_url
+                }
+            )
+            
+    except Exception as e:
+        return EmployeeToolResult(
+            success=False,
+            message=f"❌ Failed to upload {params.document_type} document: {str(e)}"
+        )
+
+@cached_employee_operation(cache_ttl=300, invalidate_on_update=True, track_performance=True)
+async def delete_employee_document_tool(params: DeleteEmployeeDocumentParams, context: Dict[str, Any] = None) -> EmployeeToolResult:
+    """Tool for deleting NDA or contract documents for employees"""
+    try:
+        async with get_ai_db() as session:
+            # Extract user_id from context
+            if not context or 'user_id' not in context:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ User context not available. Please ensure you're authenticated."
+                )
+            
+            user_id = context['user_id']
+            
+            # Find employee by ID or name (same logic as upload)
+            employee = None
+            if params.employee_id:
+                result = await session.execute(select(Employee).filter(Employee.employee_id == params.employee_id))
+                employee = result.scalar_one_or_none()
+            elif params.employee_name:
+                # Search for employee by name through profile lookup
+                cleaned_name = params.employee_name.strip()
+                name_conditions = [
+                    User.first_name.ilike(f"%{cleaned_name}%"),
+                    User.last_name.ilike(f"%{cleaned_name}%")
+                ]
+                
+                if ' ' in cleaned_name:
+                    name_parts = cleaned_name.split()
+                    if len(name_parts) >= 2:
+                        name_conditions.extend([
+                            and_(
+                                User.first_name.ilike(f"%{name_parts[0]}%"),
+                                User.last_name.ilike(f"%{name_parts[-1]}%")
+                            )
+                        ])
+                
+                profile_result = await session.execute(select(User).filter(or_(*name_conditions)))
+                profiles = profile_result.scalars().all()
+                
+                if not profiles:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee found with name '{params.employee_name}'."
+                    )
+                
+                if len(profiles) > 1:
+                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Multiple employees found with name '{params.employee_name}': {', '.join(profile_names)}. Please be more specific."
+                    )
+                
+                # Find employee record for the matched profile
+                profile_id = str(profiles[0].user_id)
+                result = await session.execute(select(Employee).filter(Employee.profile_id == profile_id))
+                employee = result.scalar_one_or_none()
+                
+                if not employee:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee record found for '{params.employee_name}'. The profile exists but no employee record has been created."
+                    )
+            else:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Either employee_id or employee_name must be provided."
+                )
+            
+            if not employee:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Employee not found."
+                )
+            
+            # Check if document exists
+            if params.document_type == "nda" and not employee.nda_file_link:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ No NDA document found for this employee."
+                )
+            elif params.document_type == "contract" and not employee.contract_file_link:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ No contract document found for this employee."
+                )
+            
+            # Delete from storage
+            storage_service = SupabaseStorageService()
+            
+            file_path = employee.nda_file_link if params.document_type == "nda" else employee.contract_file_link
+            delete_success = False
+            
+            if params.document_type == "nda":
+                delete_success = await storage_service.delete_employee_nda_document(file_path)
+            elif params.document_type == "contract":
+                delete_success = await storage_service.delete_employee_contract_document(file_path)
+            
+            if not delete_success:
+                return EmployeeToolResult(
+                    success=False,
+                    message=f"❌ Failed to delete {params.document_type} document from storage"
+                )
+            
+            # Clear document fields
+            if params.document_type == "nda":
+                employee.nda_file_link = None
+                employee.nda_document_bucket_name = None
+                employee.nda_document_file_size = None
+                employee.nda_document_mime_type = None
+                employee.nda_document_uploaded_at = None
+                employee.nda_ocr_extracted_data = None
+                # Clear new metadata fields
+                employee.nda_document_filename = None
+                employee.nda_document_file_path = None
+            elif params.document_type == "contract":
+                employee.contract_file_link = None
+                employee.contract_document_bucket_name = None
+                employee.contract_document_file_size = None
+                employee.contract_document_mime_type = None
+                employee.contract_document_uploaded_at = None
+                employee.contract_ocr_extracted_data = None
+                # Clear new metadata fields
+                employee.contract_document_filename = None
+                employee.contract_document_file_path = None
+            
+            employee.updated_by = user_id
+            employee.updated_at = datetime.utcnow()
+            
+            await session.commit()
+            
+            # Get employee name for response
+            profile_result = await session.execute(select(User).filter(User.user_id == employee.profile_id))
+            profile = profile_result.scalar_one_or_none()
+            employee_name = f"{profile.first_name} {profile.last_name}" if profile else "Unknown"
+            
+            return EmployeeToolResult(
+                success=True,
+                message=f"✅ {params.document_type.upper()} document deleted successfully for {employee_name}",
+                data={
+                    "employee_id": employee.employee_id,
+                    "employee_name": employee_name,
+                    "document_type": params.document_type,
+                    "deleted_at": datetime.utcnow().isoformat()
+                }
+            )
+            
+    except Exception as e:
+        return EmployeeToolResult(
+            success=False,
+            message=f"❌ Failed to delete {params.document_type} document: {str(e)}"
+        )
+
+@cached_employee_operation(cache_ttl=300, track_performance=True)
+async def get_employee_document_tool(params: GetEmployeeDocumentParams, context: Dict[str, Any] = None) -> EmployeeToolResult:
+    """Tool for retrieving document information and download URLs for employees"""
+    try:
+        async with get_ai_db() as session:
+            # Find employee by ID or name (same logic as upload)
+            employee = None
+            if params.employee_id:
+                result = await session.execute(select(Employee).filter(Employee.employee_id == params.employee_id))
+                employee = result.scalar_one_or_none()
+            elif params.employee_name:
+                # Search for employee by name through profile lookup
+                cleaned_name = params.employee_name.strip()
+                name_conditions = [
+                    User.first_name.ilike(f"%{cleaned_name}%"),
+                    User.last_name.ilike(f"%{cleaned_name}%")
+                ]
+                
+                if ' ' in cleaned_name:
+                    name_parts = cleaned_name.split()
+                    if len(name_parts) >= 2:
+                        name_conditions.extend([
+                            and_(
+                                User.first_name.ilike(f"%{name_parts[0]}%"),
+                                User.last_name.ilike(f"%{name_parts[-1]}%")
+                            )
+                        ])
+                
+                profile_result = await session.execute(select(User).filter(or_(*name_conditions)))
+                profiles = profile_result.scalars().all()
+                
+                if not profiles:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee found with name '{params.employee_name}'."
+                    )
+                
+                if len(profiles) > 1:
+                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ Multiple employees found with name '{params.employee_name}': {', '.join(profile_names)}. Please be more specific."
+                    )
+                
+                # Find employee record for the matched profile
+                profile_id = str(profiles[0].user_id)
+                result = await session.execute(select(Employee).filter(Employee.profile_id == profile_id))
+                employee = result.scalar_one_or_none()
+                
+                if not employee:
+                    return EmployeeToolResult(
+                        success=False,
+                        message=f"❌ No employee record found for '{params.employee_name}'. The profile exists but no employee record has been created."
+                    )
+            else:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Either employee_id or employee_name must be provided."
+                )
+            
+            if not employee:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Employee not found."
+                )
+            
+            # Get employee name
+            profile_result = await session.execute(select(User).filter(User.user_id == employee.profile_id))
+            profile = profile_result.scalar_one_or_none()
+            employee_name = f"{profile.first_name} {profile.last_name}" if profile else "Unknown"
+            
+            # Check if document exists and build response
+            storage_service = SupabaseStorageService()
+            if params.document_type == "nda":
+                if not employee.nda_file_link:
+                    return EmployeeToolResult(
+                        success=True,
+                        message=f"❌ No NDA document found for {employee_name}",
+                        data={
+                            "employee_id": employee.employee_id,
+                            "employee_name": employee_name,
+                            "document_type": "nda",
+                            "has_document": False
+                        }
+                    )
+                
+                download_url = storage_service.get_employee_nda_document_url(employee.nda_file_link)
+                
+                return EmployeeToolResult(
+                    success=True,
+                    message=f"✅ NDA document information retrieved for {employee_name}",
+                    data={
+                        "employee_id": employee.employee_id,
+                        "employee_name": employee_name,
+                        "document_type": "nda",
+                        "has_document": True,
+                        "filename": employee.nda_document_mime_type.split('/')[-1] if employee.nda_document_mime_type else "nda_document",
+                        "file_path": employee.nda_file_link,
+                        "file_size": employee.nda_document_file_size,
+                        "mime_type": employee.nda_document_mime_type,
+                        "uploaded_at": employee.nda_document_uploaded_at,
+                        "download_url": download_url,
+                        "ocr_extracted_data": employee.nda_ocr_extracted_data
+                    }
+                )
+                
+            elif params.document_type == "contract":
+                if not employee.contract_file_link:
+                    return EmployeeToolResult(
+                        success=True,
+                        message=f"❌ No contract document found for {employee_name}",
+                        data={
+                            "employee_id": employee.employee_id,
+                            "employee_name": employee_name,
+                            "document_type": "contract",
+                            "has_document": False
+                        }
+                    )
+                
+                download_url = storage_service.get_employee_contract_document_url(employee.contract_file_link)
+                
+                return EmployeeToolResult(
+                    success=True,
+                    message=f"✅ Contract document information retrieved for {employee_name}",
+                    data={
+                        "employee_id": employee.employee_id,
+                        "employee_name": employee_name,
+                        "document_type": "contract",
+                        "has_document": True,
+                        "filename": employee.contract_document_mime_type.split('/')[-1] if employee.contract_document_mime_type else "contract_document",
+                        "file_path": employee.contract_file_link,
+                        "file_size": employee.contract_document_file_size,
+                        "mime_type": employee.contract_document_mime_type,
+                        "uploaded_at": employee.contract_document_uploaded_at,
+                        "download_url": download_url,
+                        "ocr_extracted_data": employee.contract_ocr_extracted_data
+                    }
+                )
+            else:
+                return EmployeeToolResult(
+                    success=False,
+                    message="❌ Invalid document type. Must be 'nda' or 'contract'."
+                )
+            
+    except Exception as e:
+        return EmployeeToolResult(
+            success=False,
+            message=f"❌ Failed to get {params.document_type} document: {str(e)}"
         )

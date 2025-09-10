@@ -191,6 +191,58 @@ class EmployeeAgent:
                         }
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "upload_employee_document",
+                    "description": "Upload NDA or contract documents for an employee. Handles file upload and database updates with enhanced metadata tracking. CRITICAL: Always extract employee name from user message - look for patterns like 'for employee [Name]', 'for [Name]', 'this is for [Name]'.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "employee_id": {"type": "integer", "description": "Employee ID"},
+                            "employee_name": {"type": "string", "description": "Employee name extracted from user message (e.g., 'Steve York' from 'for employee Steve York'). REQUIRED when employee_id not provided."},
+                            "document_type": {"type": "string", "enum": ["nda", "contract"], "description": "Type of document to upload"},
+                            "file_data": {"type": "string", "description": "Base64 encoded file content"},
+                            "filename": {"type": "string", "description": "Original filename"},
+                            "file_size": {"type": "integer", "description": "File size in bytes"},
+                            "mime_type": {"type": "string", "description": "MIME type of the file"}
+                        },
+                        "required": ["document_type", "file_data", "filename", "file_size", "mime_type"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_employee_document",
+                    "description": "Delete NDA or contract documents for an employee. Removes both file and database references.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "employee_id": {"type": "integer", "description": "Employee ID"},
+                            "employee_name": {"type": "string", "description": "Employee name (alternative to employee_id)"},
+                            "document_type": {"type": "string", "enum": ["nda", "contract"], "description": "Type of document to delete"}
+                        },
+                        "required": ["document_type"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_employee_document",
+                    "description": "Get document information and download URLs for an employee. Provides access to both NDA and contract documents.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "employee_id": {"type": "integer", "description": "Employee ID"},
+                            "employee_name": {"type": "string", "description": "Employee name (alternative to employee_id)"},
+                            "document_type": {"type": "string", "enum": ["nda", "contract"], "description": "Type of document to retrieve"}
+                        },
+                        "required": ["document_type"]
+                    }
+                }
             }
         ]
 

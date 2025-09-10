@@ -12,6 +12,7 @@ export const useChat = () => {
     setTyping,
     addMessage,
     clearError,
+    setMessages,
   } = useChatStore();
 
   const handleSendMessage = useCallback(
@@ -40,6 +41,8 @@ export const useChat = () => {
     sendMessage: handleSendMessage,
     clearChat: handleClearChat,
     clearError,
+    setTyping,
+    setMessages,
     // Computed properties
     hasMessages: messages.length > 0,
     lastMessage: messages[messages.length - 1] || null,
