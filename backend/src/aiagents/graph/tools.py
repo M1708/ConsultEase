@@ -671,6 +671,24 @@ async def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
         # All parameters should be provided directly in kwargs for better performance
         # This eliminates the need for synthetic message parsing and fallback logic
         
+        # CRITICAL: If document data contains placeholders, get the real data from context
+        if context and 'file_info' in context:
+            file_info = context['file_info']
+            
+            # Replace NDA document placeholders
+            if kwargs.get('nda_document_data') == "<base64_encoded_data>":
+                kwargs['nda_document_data'] = file_info.get('file_data')
+                kwargs['nda_document_filename'] = file_info.get('filename', kwargs.get('nda_document_filename'))
+                kwargs['nda_document_size'] = file_info.get('file_size', kwargs.get('nda_document_size'))
+                kwargs['nda_document_mime_type'] = file_info.get('mime_type', kwargs.get('nda_document_mime_type'))
+            
+            # Replace contract document placeholders
+            if kwargs.get('contract_document_data') == "<base64_encoded_data>":
+                kwargs['contract_document_data'] = file_info.get('file_data')
+                kwargs['contract_document_filename'] = file_info.get('filename', kwargs.get('contract_document_filename'))
+                kwargs['contract_document_size'] = file_info.get('file_size', kwargs.get('contract_document_size'))
+                kwargs['contract_document_mime_type'] = file_info.get('mime_type', kwargs.get('contract_document_mime_type'))
+        
         # Create employee using the existing create_employee tool
         # TODO: OPTIMIZATION - Pass employee_name instead of profile_id to eliminate nested session
         employee_params_dict = {
@@ -688,7 +706,16 @@ async def _create_employee_from_details_wrapper(**kwargs) -> Dict[str, Any]:
             'rate': final_rate,
             'currency': kwargs.get('currency', 'USD'),
             'nda_file_link': kwargs.get('nda_file_link'),
-            'contract_file_link': kwargs.get('contract_file_link')
+            'contract_file_link': kwargs.get('contract_file_link'),
+            # Add document upload parameters
+            'nda_document_data': kwargs.get('nda_document_data'),
+            'nda_document_filename': kwargs.get('nda_document_filename'),
+            'nda_document_size': kwargs.get('nda_document_size'),
+            'nda_document_mime_type': kwargs.get('nda_document_mime_type'),
+            'contract_document_data': kwargs.get('contract_document_data'),
+            'contract_document_filename': kwargs.get('contract_document_filename'),
+            'contract_document_size': kwargs.get('contract_document_size'),
+            'contract_document_mime_type': kwargs.get('contract_document_mime_type')
         }
         
         # Remove None values to avoid validation errors

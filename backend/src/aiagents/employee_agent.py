@@ -37,7 +37,15 @@ class EmployeeAgent:
                             "rate": {"type": "number", "description": "Rate amount"},
                             "currency": {"type": "string", "description": "Currency code"},
                             "nda_file_link": {"type": "string", "description": "Link to NDA document"},
-                            "contract_file_link": {"type": "string", "description": "Link to employment contract document"}
+                            "contract_file_link": {"type": "string", "description": "Link to employment contract document"},
+                            "nda_document_data": {"type": "string", "description": "Base64 encoded NDA document data for upload during creation"},
+                            "nda_document_filename": {"type": "string", "description": "NDA document filename"},
+                            "nda_document_size": {"type": "integer", "description": "NDA document file size in bytes"},
+                            "nda_document_mime_type": {"type": "string", "description": "NDA document MIME type"},
+                            "contract_document_data": {"type": "string", "description": "Base64 encoded contract document data for upload during creation"},
+                            "contract_document_filename": {"type": "string", "description": "Contract document filename"},
+                            "contract_document_size": {"type": "integer", "description": "Contract document file size in bytes"},
+                            "contract_document_mime_type": {"type": "string", "description": "Contract document MIME type"}
                         },
                         "required": ["profile_id", "employment_type", "full_time_part_time"]
                     }
@@ -170,7 +178,15 @@ class EmployeeAgent:
                             "salary": {"type": "number", "description": "Monthly salary amount in numbers (e.g., 10000 for $10,000) - use this for salary-based compensation"},
                             "currency": {"type": "string", "description": "Currency code (defaults to USD)"},
                             "nda_file_link": {"type": "string", "description": "Link to NDA document"},
-                            "contract_file_link": {"type": "string", "description": "Link to employment contract document"}
+                            "contract_file_link": {"type": "string", "description": "Link to employment contract document"},
+                            "nda_document_data": {"type": "string", "description": "Base64 encoded NDA document data for upload during creation"},
+                            "nda_document_filename": {"type": "string", "description": "NDA document filename"},
+                            "nda_document_size": {"type": "integer", "description": "NDA document file size in bytes"},
+                            "nda_document_mime_type": {"type": "string", "description": "NDA document MIME type"},
+                            "contract_document_data": {"type": "string", "description": "Base64 encoded contract document data for upload during creation"},
+                            "contract_document_filename": {"type": "string", "description": "Contract document filename"},
+                            "contract_document_size": {"type": "integer", "description": "Contract document file size in bytes"},
+                            "contract_document_mime_type": {"type": "string", "description": "Contract document MIME type"}
                         },
                         "required": ["employee_name", "employment_type", "full_time_part_time"]
                     }

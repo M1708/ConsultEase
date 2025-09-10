@@ -439,7 +439,8 @@ EMPLOYEE DOCUMENT MANAGEMENT:
   * "this nda document is for employee Steve York" → Extract "Steve York"
   * "Upload contract for Jane Doe" → Extract "Jane Doe"
   * "This file is for employee Mike Johnson" → Extract "Mike Johnson"
-    - CRITICAL: When file_info is present in the context, you MUST use ONLY the upload_employee_document tool
+    - CRITICAL: When file_info is present in the context AND the user is uploading a document for an existing employee, use ONLY the upload_employee_document tool
+    - When file_info is present AND the user is creating a new employee, use create_employee with document parameters
     - DO NOT call any other tools after uploading - just respond with the upload confirmation
     - The file_info contains: filename, mime_type, file_data (base64), file_size
     - ALWAYS use employee_name parameter when calling upload_employee_document (not employee_id)
@@ -467,9 +468,19 @@ EMPLOYEE CREATION WORKFLOW:
   * Full-time/Part-time (e.g., "fulltime" → full_time)
   * Salary and rate type (e.g., "$10,000 monthly" → rate: 10000, rate_type: salary)
   * Hire date (e.g., "15th Aug 2025" → "2025-08-15")
-- Call 'create_employee' with the profile_id and ALL extracted employee details
+- **IF DOCUMENTS ARE PROVIDED** (file_info context exists), include document parameters in create_employee call:
+  * nda_document_data: Base64 encoded file data from file_info
+  * nda_document_filename: Original filename from file_info
+  * nda_document_size: File size from file_info
+  * nda_document_mime_type: MIME type from file_info
+  * contract_document_data: Base64 encoded file data from file_info
+  * contract_document_filename: Original filename from file_info
+  * contract_document_size: File size from file_info
+  * contract_document_mime_type: MIME type from file_info
+- Call 'create_employee' with the profile_id, ALL extracted employee details, AND document parameters if provided
 - NEVER ask for information the user already provided
 - Profile search is step 1, employee creation is step 2
+- Do NOT call upload_employee_document separately when creating an employee with documents
 
 # 🔧 MESSAGE PARSING INSTRUCTIONS: Added to guide agent through detail extraction
 # TODO: If this change doesn't fix the issue, remove the MESSAGE PARSING INSTRUCTIONS section

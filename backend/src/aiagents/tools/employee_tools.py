@@ -62,6 +62,15 @@ class CreateEmployeeParams(BaseModel):
     currency: str = "USD"
     nda_file_link: Optional[str] = None
     contract_file_link: Optional[str] = None
+    # Document upload fields for creation
+    nda_document_data: Optional[str] = None  # Base64 encoded file data
+    nda_document_filename: Optional[str] = None
+    nda_document_size: Optional[int] = None
+    nda_document_mime_type: Optional[str] = None
+    contract_document_data: Optional[str] = None  # Base64 encoded file data
+    contract_document_filename: Optional[str] = None
+    contract_document_size: Optional[int] = None
+    contract_document_mime_type: Optional[str] = None
 
 class UpdateEmployeeParams(BaseModel):
     employee_id: Optional[int] = None
@@ -680,9 +689,89 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                 # Get the employee name from the profile for the success message
                 employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
                 
+                # Handle document uploads if provided
+                uploaded_documents = []
+                storage_service = SupabaseStorageService()
+                
+                # Upload NDA document if provided
+                if params.nda_document_data and params.nda_document_filename:
+                    try:
+                        # Decode base64 data
+                        import base64
+                        file_content = base64.b64decode(params.nda_document_data)
+                        file_obj = BytesIO(file_content)
+                        file_obj.name = params.nda_document_filename
+                        
+                        # Upload to storage
+                        upload_result = await storage_service.upload_employee_nda_document(file_obj, db_employee.employee_id)
+                        
+                        if upload_result["success"]:
+                            # Update employee record with document info
+                            db_employee.nda_document_bucket_name = "employee-nda-documents"
+                            db_employee.nda_document_file_size = upload_result["file_size"]
+                            db_employee.nda_document_mime_type = upload_result["mime_type"]
+                            db_employee.nda_document_uploaded_at = upload_result["uploaded_at"]
+                            db_employee.nda_document_filename = upload_result["filename"]
+                            db_employee.nda_document_file_path = upload_result["file_path"]
+                            
+                            await session.commit()
+                            uploaded_documents.append("NDA document")
+                    except Exception as e:
+                        print(f"Warning: Failed to upload NDA document: {str(e)}")
+                
+                # Upload contract document if provided
+                if params.contract_document_data and params.contract_document_filename:
+                    try:
+                        # Decode base64 data
+                        import base64
+                        file_content = base64.b64decode(params.contract_document_data)
+                        file_obj = BytesIO(file_content)
+                        file_obj.name = params.contract_document_filename
+                        
+                        # Upload to storage
+                        upload_result = await storage_service.upload_employee_contract_document(file_obj, db_employee.employee_id)
+                        
+                        if upload_result["success"]:
+                            # Update employee record with document info
+                            db_employee.contract_document_bucket_name = "employee-contract-documents"
+                            db_employee.contract_document_file_size = upload_result["file_size"]
+                            db_employee.contract_document_mime_type = upload_result["mime_type"]
+                            db_employee.contract_document_uploaded_at = upload_result["uploaded_at"]
+                            db_employee.contract_document_filename = upload_result["filename"]
+                            db_employee.contract_document_file_path = upload_result["file_path"]
+                            
+                            await session.commit()
+                            uploaded_documents.append("Contract document")
+                    except Exception as e:
+                        print(f"Warning: Failed to upload contract document: {str(e)}")
+                
+                # Build success message with document info
+                success_message = f"✅ Employee record created successfully for {employee_name} (Employee ID: {db_employee.employee_id})"
+
+                if uploaded_documents:
+                    success_message += "\n\n### Document Information"
+                    
+                    # Add NDA document info if uploaded
+                    if db_employee.nda_document_file_path:
+                        nda_download_url = storage_service.get_employee_nda_document_url(db_employee.nda_document_file_path)
+                        nda_file_size = format_file_size(db_employee.nda_document_file_size) if db_employee.nda_document_file_size else "Unknown size"
+                        success_message += f"\n- **Document Type:** NDA"
+                        success_message += f"\n- **Filename:** [{db_employee.nda_document_filename}]({nda_download_url})"
+                        success_message += f"\n- **File Size:** {nda_file_size}"
+                        success_message += f"\n- **Upload Date:** {db_employee.nda_document_uploaded_at.strftime('%B %d, %Y') if db_employee.nda_document_uploaded_at else 'Unknown'}"
+                    
+                    # Add contract document info if uploaded
+                    if db_employee.contract_document_file_path:
+                        contract_download_url = storage_service.get_employee_contract_document_url(db_employee.contract_document_file_path)
+                        contract_file_size = format_file_size(db_employee.contract_document_file_size) if db_employee.contract_document_file_size else "Unknown size"
+                        success_message += f"\n- **Document Type:** Contract"
+                        success_message += f"\n- **Filename:** [{db_employee.contract_document_filename}]({contract_download_url})"
+                        success_message += f"\n- **File Size:** {contract_file_size}"
+                        success_message += f"\n- **Upload Date:** {db_employee.contract_document_uploaded_at.strftime('%B %d, %Y') if db_employee.contract_document_uploaded_at else 'Unknown'}"
+                
                 return EmployeeToolResult(
                 success=True,
-                message=f"✅ Employee record created successfully for {employee_name} (Employee ID: {db_employee.employee_id})",
+                message=success_message,
                 data={
                     "employee_id": db_employee.employee_id,
                     "employee_name": employee_name,
@@ -700,6 +789,7 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                     "email": profile_exists.email,
                     "nda_file_link": db_employee.nda_file_link,
                     "contract_file_link": db_employee.contract_file_link,
+                    "uploaded_documents": uploaded_documents,
                     "status": "Active"
                 }
             )
@@ -1217,6 +1307,16 @@ async def get_employee_details_tool(employee_id: int) -> EmployeeToolResult:
         # Get profile information
             check_profile = await session.execute(select(User).filter(User.user_id == employee.profile_id))
             profile = check_profile.scalar_one_or_none()
+            
+            # Initialize storage service for document URLs
+            storage_service = SupabaseStorageService()
+            
+            # Debug: Check if employee has document fields
+            print(f"🔍 DEBUG: Employee document fields:")
+            print(f"  - nda_document_file_path: {employee.nda_document_file_path}")
+            print(f"  - contract_document_file_path: {employee.contract_document_file_path}")
+            print(f"  - nda_document_filename: {employee.nda_document_filename}")
+            print(f"  - contract_document_filename: {employee.contract_document_filename}")
         
             return EmployeeToolResult(
                 success=True,
@@ -1236,6 +1336,22 @@ async def get_employee_details_tool(employee_id: int) -> EmployeeToolResult:
                 "currency": employee.currency,
                 "nda_file_link": employee.nda_file_link,
                 "contract_file_link": employee.contract_file_link,
+                "nda_document": {
+                    "filename": employee.nda_document_filename,
+                    "file_size": employee.nda_document_file_size,
+                    "mime_type": employee.nda_document_mime_type,
+                    "uploaded_at": employee.nda_document_uploaded_at.isoformat() if employee.nda_document_uploaded_at else None,
+                    "download_url": storage_service.get_employee_nda_document_url(employee.nda_document_file_path) if employee.nda_document_file_path else None,
+                    "has_document": employee.nda_document_file_path is not None
+                },
+                "contract_document": {
+                    "filename": employee.contract_document_filename,
+                    "file_size": employee.contract_document_file_size,
+                    "mime_type": employee.contract_document_mime_type,
+                    "uploaded_at": employee.contract_document_uploaded_at.isoformat() if employee.contract_document_uploaded_at else None,
+                    "download_url": storage_service.get_employee_contract_document_url(employee.contract_document_file_path) if employee.contract_document_file_path else None,
+                    "has_document": employee.contract_document_file_path is not None
+                },
                 "profile": {
                     "first_name": profile.first_name if profile else None,
                     "last_name": profile.last_name if profile else None,
@@ -1416,16 +1532,44 @@ async def delete_employee_tool(params: DeleteEmployeeParams, context: Dict[str, 
             if hasattr(employee, 'profile') and employee.profile:
                 employee_name = f"{employee.profile.first_name} {employee.profile.last_name}"
             
+            # Delete associated documents before deleting employee record
+            storage_service = SupabaseStorageService()
+            deleted_documents = []
+            
+            # Delete NDA document if it exists
+            if employee.nda_document_file_path:
+                try:
+                    nda_deleted = await storage_service.delete_employee_nda_document(employee.nda_document_file_path)
+                    if nda_deleted:
+                        deleted_documents.append("NDA document")
+                except Exception as e:
+                    print(f"Warning: Failed to delete NDA document: {str(e)}")
+            
+            # Delete contract document if it exists
+            if employee.contract_document_file_path:
+                try:
+                    contract_deleted = await storage_service.delete_employee_contract_document(employee.contract_document_file_path)
+                    if contract_deleted:
+                        deleted_documents.append("Contract document")
+                except Exception as e:
+                    print(f"Warning: Failed to delete contract document: {str(e)}")
+            
             # Delete the employee record
             await session.delete(employee)
             await session.commit()
             
+            # Build success message with document deletion info
+            success_message = f"✅ Employee '{employee_name}' (ID: {employee.employee_id}) has been successfully deleted."
+            if deleted_documents:
+                success_message += f" Also deleted: {', '.join(deleted_documents)}."
+            
             return EmployeeToolResult(
                 success=True,
-                message=f"✅ Employee '{employee_name}' (ID: {employee.employee_id}) has been successfully deleted.",
+                message=success_message,
                 data={
                     "employee_id": employee.employee_id,
                     "employee_name": employee_name,
+                    "deleted_documents": deleted_documents,
                     "deleted_at": datetime.utcnow().isoformat()
                 }
             )
