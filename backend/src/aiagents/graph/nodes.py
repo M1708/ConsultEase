@@ -1277,7 +1277,16 @@ class EnhancedAgentNodeExecutor:
                 response += f"- **Client Name:** {data.get('client_name', 'N/A')}\n"
                 response += f"- **Industry:** {data.get('industry', 'N/A')}\n"
                 response += f"- **Primary Contact Name:** {data.get('primary_contact_name', 'N/A')}\n"
-                response += f"- **Primary Contact Email:** {data.get('primary_contact_email', 'N/A')}\n"
+                # Extract plain email from markdown format if present
+                email_raw = data.get('primary_contact_email', 'N/A')
+                if email_raw != 'N/A' and '[' in email_raw and '](' in email_raw:
+                    # Extract email from markdown format [email](mailto:email)
+                    import re
+                    email_match = re.search(r'\[([^\]]+)\]\([^)]+\)', email_raw)
+                    email_plain = email_match.group(1) if email_match else email_raw
+                else:
+                    email_plain = email_raw
+                response += f"- **Primary Contact Email:** {email_plain}\n"
                 response += f"- **Company Size:** {data.get('company_size', 'N/A')}\n"
                 response += f"- **Notes:** {data.get('notes', 'N/A')}\n"
                 response += f"- **Created:** {data.get('created_at', 'N/A')}\n"

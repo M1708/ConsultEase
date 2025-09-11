@@ -570,7 +570,7 @@ export default function ChatPage() {
                             </div>
                             <TypewriterText
                               text={msg.response}
-                              className="text-gray-900 text-base"
+                              className="text-gray-900 text-sm"
                               style={{ fontFamily: "Arial, sans-serif" }}
                             />
                             <div
@@ -625,7 +625,26 @@ export default function ChatPage() {
             {/* Chat Input Area */}
             <div className="bg-white border-t-2 border-blue-400 p-4 flex-shrink-0">
               <div className="max-w-4xl mx-auto">
-                {/* File Upload Area - Removed duplicate display */}
+                {/* Selected File Display - Moved above input area */}
+                {selectedFile && (
+                  <div className="mb-3 flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <span className="text-sm text-blue-600 flex items-center gap-2">
+                      📎 {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+                    </span>
+                    <button
+                      onClick={() => {
+                        setSelectedFile(null);
+                        // Clear the file input to allow selecting the same file again
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = '';
+                        }
+                      }}
+                      className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
+                    >
+                      ✕ Remove
+                    </button>
+                  </div>
+                )}
 
                 {/* Chat Input with File Upload */}
                 <form
@@ -648,27 +667,6 @@ export default function ChatPage() {
                       />
                     </label>
                   </div>
-
-                  {/* Selected File Display */}
-                  {selectedFile && (
-                    <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-md border border-blue-200">
-                      <span className="text-sm text-blue-600 flex items-center gap-2">
-                        📎 {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
-                      </span>
-                      <button
-                        onClick={() => {
-                          setSelectedFile(null);
-                          // Clear the file input to allow selecting the same file again
-                          if (fileInputRef.current) {
-                            fileInputRef.current.value = '';
-                          }
-                        }}
-                        className="text-red-500 hover:text-red-700 text-sm font-medium"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  )}
 
                   {/* Chat Input */}
                   <div className="flex-1 flex space-x-3">

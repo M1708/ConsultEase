@@ -1,12 +1,18 @@
 
 import json
+from sre_parse import ANY
 from typing import Dict, Any, List
 import re
 from datetime import datetime
 from sqlalchemy import select
-
+import asyncio
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+      
+from src.database.core.models import Client, Contract
 from src.aiagents.graph.state import AgentState
-from src.database.core.database import get_ai_db
+from src.database.core.database import get_ai_db, get_db
+
 # --- Import all tool functions and params from the existing tool files ---
 from src.aiagents.tools.contract_tools import (
     create_client_tool, search_clients_tool, get_all_clients_tool,
@@ -32,29 +38,29 @@ from src.database.core.models import Employee
 # --- Tool Wrappers (migrated from ContractAgent) ---
 # These wrappers handle the messy work of unpacking arguments and calling the core tool function.
 
-def _create_client_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _create_client_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     params = CreateClientParams(**kwargs)
-    result = create_client_tool(params, context, db)
+    result = await create_client_tool(params, context)
     return result.model_dump()
 
-def _get_all_clients_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
-    result = get_all_clients_tool(db)
+async def _get_all_clients_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
+    result = await get_all_clients_tool()
     return result.model_dump()
 
-def _get_contract_details_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _get_contract_details_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     contract_id = kwargs.get("contract_id")
     client_name = kwargs.get("client_name")
-    result = get_contract_details_tool(contract_id, client_name, db)
+    result = await get_contract_details_tool(contract_id, client_name)
     return result.model_dump()
 
-def _get_client_details_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _get_client_details_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     client_name = kwargs.get("client_name")
-    result = get_client_details_tool(client_name, db)
+    result = await get_client_details_tool(client_name)
     # ClientToolResult is not a Pydantic model, so convert manually
     return {
         "success": result.success,
@@ -62,24 +68,24 @@ def _get_client_details_wrapper(**kwargs) -> Dict[str, Any]:
         "data": result.data
     }
 
-def _search_clients_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _search_clients_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     search_term = kwargs.get("search_term")
     limit = kwargs.get("limit", 10)
-    result = search_clients_tool(search_term, limit, db)
+    result = await search_clients_tool(search_term, limit)
     return result.model_dump()
 
-def _analyze_contract_wrapper(**kwargs) -> Dict[str, Any]:
+async def _analyze_contract_wrapper(**kwargs) -> Dict[str, Any]:
     contract_text = kwargs.get("contract_text")
-    result = analyze_contract_tool(contract_text)
+    result = await analyze_contract_tool(contract_text)
     return result.model_dump()
 
-def _smart_create_contract_wrapper(**kwargs) -> Dict[str, Any]:
+async def _smart_create_contract_wrapper(**kwargs) -> Dict[str, Any]:
     """Enhanced wrapper for creating contracts with comprehensive response details"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     params = SmartContractParams(**kwargs)
-    result = smart_create_contract_tool(params, context, db)
+    result = await smart_create_contract_tool(params, context)
     
     # If successful, enhance the response with comprehensive details
     if result.success and result.data:
@@ -87,110 +93,116 @@ def _smart_create_contract_wrapper(**kwargs) -> Dict[str, Any]:
         
         # Get additional client information for context
         try:
-            if db is None:
-                from src.database.core.database import get_db
-                db = next(get_db())
-            
-            from src.database.core.models import Client, Contract
-            
+            async with get_ai_db() as session:
             # Get the created contract for full details
-            contract_id = contract_data.get('contract_id')
-            if contract_id:
-                contract = db.query(Contract).filter(Contract.contract_id == contract_id).first()
-                client = db.query(Client).filter(Client.client_id == contract.client_id).first() if contract else None
-                
-                if contract and client:
-                    enhanced_data = {
-                        "operation": "create_contract",
-                        "contract": {
-                            "contract_id": contract.contract_id,
-                            "client_id": contract.client_id,
-                            "client_name": client.client_name,
-                            "contract_type": contract.contract_type,
-                            "status": contract.status,
-                            "original_amount": float(contract.original_amount) if contract.original_amount else None,
-                            "current_amount": float(contract.current_amount) if contract.current_amount else None,
-                            "billing_frequency": contract.billing_frequency,
-                            "start_date": contract.start_date.strftime("%Y-%m-%d") if contract.start_date else None,
-                            "end_date": contract.end_date.strftime("%Y-%m-%d") if contract.end_date else None,
-                            "billing_prompt_next_date": contract.billing_prompt_next_date.strftime("%Y-%m-%d") if contract.billing_prompt_next_date else None,
-                            "notes": contract.notes,
-                            "created_at": contract.created_at.strftime("%Y-%m-%d %H:%M:%S") if contract.created_at else None,
-                            "updated_at": contract.updated_at.strftime("%Y-%m-%d %H:%M:%S") if contract.updated_at else None
-                        },
-                        "client": {
-                            "client_id": client.client_id,
-                            "client_name": client.client_name,
-                            "industry": client.industry,
-                            "company_size": client.company_size,
-                            "primary_contact_name": client.primary_contact_name,
-                            "primary_contact_email": client.primary_contact_email
-                        },
-                        "summary": {
-                            "total_contract_value": float(contract.original_amount) if contract.original_amount else None,
-                            "contract_duration_months": _calculate_contract_duration(
-                                contract.start_date.strftime("%Y-%m-%d") if contract.start_date else None,
-                                contract.end_date.strftime("%Y-%m-%d") if contract.end_date else None
-                            ),
-                            "next_billing_date": contract.billing_prompt_next_date.strftime("%Y-%m-%d") if contract.billing_prompt_next_date else None,
-                            "billing_frequency": contract.billing_frequency,
-                            "contract_status": contract.status
-                        }
-                    }
+                contract_id = contract_data.get('contract_id')
+                if contract_id:
+                # Fetch contract
+                    contract_stmt = select(Contract).where(Contract.contract_id == contract_id)
+                    contract_result = await session.execute(contract_stmt)
+                    contract = contract_result.scalars().first()
+
+                    # Fetch client
+                    client = None
+                    if contract:
+                        client_stmt = select(Client).where(Client.client_id == contract.client_id)
+                        client_result = await session.execute(client_stmt)
+                        client = client_result.scalars().first()
                     
-                    return {
-                        "success": True,
-                        "message": f"✅ Successfully created contract for '{client.client_name}'. Contract ID: {contract.contract_id}",
-                        "data": enhanced_data
-                    }
+                    if contract and client:
+                        enhanced_data = {
+                            "operation": "create_contract",
+                            "contract": {
+                                "contract_id": contract.contract_id,
+                                "client_id": contract.client_id,
+                                "client_name": client.client_name,
+                                "contract_type": contract.contract_type,
+                                "status": contract.status,
+                                "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                                "current_amount": float(contract.current_amount) if contract.current_amount else None,
+                                "billing_frequency": contract.billing_frequency,
+                                "start_date": contract.start_date.strftime("%Y-%m-%d") if contract.start_date else None,
+                                "end_date": contract.end_date.strftime("%Y-%m-%d") if contract.end_date else None,
+                                "billing_prompt_next_date": contract.billing_prompt_next_date.strftime("%Y-%m-%d") if contract.billing_prompt_next_date else None,
+                                "notes": contract.notes,
+                                "created_at": contract.created_at.strftime("%Y-%m-%d %H:%M:%S") if contract.created_at else None,
+                                "updated_at": contract.updated_at.strftime("%Y-%m-%d %H:%M:%S") if contract.updated_at else None
+                            },
+                            "client": {
+                                "client_id": client.client_id,
+                                "client_name": client.client_name,
+                                "industry": client.industry,
+                                "company_size": client.company_size,
+                                "primary_contact_name": client.primary_contact_name,
+                                "primary_contact_email": client.primary_contact_email
+                            },
+                            "summary": {
+                                "total_contract_value": float(contract.original_amount) if contract.original_amount else None,
+                                "contract_duration_months": _calculate_contract_duration(
+                                    contract.start_date.strftime("%Y-%m-%d") if contract.start_date else None,
+                                    contract.end_date.strftime("%Y-%m-%d") if contract.end_date else None
+                                ),
+                                "next_billing_date": contract.billing_prompt_next_date.strftime("%Y-%m-%d") if contract.billing_prompt_next_date else None,
+                                "billing_frequency": contract.billing_frequency,
+                                "contract_status": contract.status
+                            }
+                        }
+                        
+                        return {
+                            "success": True,
+                            "message": f"✅ Successfully created contract for '{client.client_name}'. Contract ID: {contract.contract_id}",
+                            "data": enhanced_data
+                        }
         except Exception as e:
             # If enhancement fails, fall back to original response but log the error
             print(f"Warning: Could not enhance contract response: {str(e)}")
     
     # Return original response if enhancement fails or if not successful
-    return result.model_dump()
+    
 
-def _get_contracts_by_client_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _get_contracts_by_client_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     client_name = kwargs.get("client_name")
-    result = get_contracts_by_client_tool(client_name, db)
+    result = await get_contracts_by_client_tool(client_name)
     return result.model_dump()
 
-def _get_all_contracts_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
-    result = get_all_contracts_tool(db)
+async def _get_all_contracts_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
+    result = await get_all_contracts_tool()
     return result.model_dump()
 
-def _get_contracts_by_billing_date_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _get_contracts_by_billing_date_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     start_date = kwargs.get("start_date")
     end_date = kwargs.get("end_date")
-    result = get_contracts_by_billing_date_tool(start_date, end_date, db)
+    result = await get_contracts_by_billing_date_tool(start_date, end_date)
     return result.model_dump()
 
-def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
+async def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
     db = kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     params = UpdateContractParams(**kwargs)
-
-def _get_contracts_for_next_month_billing_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
-    context = kwargs.pop('context', None)
-    result = get_contracts_for_next_month_billing_tool(context, db)
+    result = await update_contract_tool(params, context)
     return result.model_dump()
 
-def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _get_contracts_for_next_month_billing_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
+    context = kwargs.pop('context', None)
+    result = await get_contracts_for_next_month_billing_tool(context)
+    return result.model_dump()
+
+async def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     params = UpdateContractParams(**kwargs)
-    result = update_contract_tool(params, context, db)
+    result = await update_contract_tool(params, context)
     return result.model_dump()
 
-def _update_client_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _update_client_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     params = UpdateClientParamsClient(**kwargs)
-    result = update_client_tool_client(params, context, db)
+    result = await update_client_tool_client(params, context)
     # ClientToolResult is not a Pydantic model, so convert manually
     return {
         "success": result.success,
@@ -198,20 +210,20 @@ def _update_client_wrapper(**kwargs) -> Dict[str, Any]:
         "data": result.data
     }
 
-def _smart_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
+async def _smart_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
     params = ContractDocumentParams(**kwargs)
-    result = smart_contract_document_tool(params, db)
+    result = await smart_contract_document_tool(params)
     return result.model_dump()
 
-def _get_all_clients_with_contracts_wrapper(**kwargs) -> Dict[str, Any]:
-    db = kwargs.pop('db', None)
-    result = get_all_clients_with_contracts_tool(db)
+async def _get_all_clients_with_contracts_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
+    result = await get_all_clients_with_contracts_tool()
     return result.model_dump()
 
-def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
+async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
     """Enhanced wrapper for creating a client and then a contract in sequence with comprehensive response"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     
     try:
@@ -225,7 +237,7 @@ def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
             notes=kwargs.get('notes')
         )
         
-        client_result = create_client_tool(client_params, context, db)
+        client_result = await create_client_tool(client_params, context)
         if not client_result.success:
             return client_result.model_dump()
         
@@ -241,7 +253,7 @@ def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
             notes=kwargs.get('contract_notes')
         )
         
-        contract_result = smart_create_contract_tool(contract_params, context, db)
+        contract_result = await smart_create_contract_tool(contract_params, context)
         
         # Enhanced response with comprehensive details
         if contract_result.success:
@@ -295,14 +307,11 @@ def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
             "message": f"❌ Failed to create client and contract: {str(e)}"
         }
 
-def _calculate_contract_duration(start_date: str, end_date: str) -> int:
+async def _calculate_contract_duration(start_date: str, end_date: str) -> int:
     """Helper function to calculate contract duration in months"""
     try:
         if not start_date or not end_date:
-            return None
-        
-        from datetime import datetime
-        from dateutil.relativedelta import relativedelta
+            return None     
         
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -313,59 +322,56 @@ def _calculate_contract_duration(start_date: str, end_date: str) -> int:
     except:
         return None
 
-def _update_contract_by_id_wrapper(**kwargs) -> Dict[str, Any]:
+async def _update_contract_by_id_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for updating contract by ID instead of client name"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     contract_id = kwargs.get('contract_id')
     
     try:
-        if db is None:
-            from src.database.core.database import get_db
-            db = next(get_db())
-        
-        # Find the contract by ID
-        from src.database.core.models import Contract, Client
-        contract = db.query(Contract).filter(Contract.contract_id == contract_id).first()
-        
-        if not contract:
-            return {
-                "success": False,
-                "message": f"❌ Contract with ID {contract_id} not found."
-            }
+        async with get_ai_db() as session:
+            result = await session.execute(select(Contract).where(Contract.contract_id == contract_id))
+            contract = result.scalar_one_or_none()
+            
+            if not contract:
+                return {
+                    "success": False,
+                    "message": f"❌ Contract with ID {contract_id} not found."
+                }
         
         # Get the client name
-        client = db.query(Client).filter(Client.client_id == contract.client_id).first()
-        if not client:
-            return {
-                "success": False,
-                "message": f"❌ Client for contract ID {contract_id} not found."
-            }
-        
-        # Use the existing update_contract_tool with client name
-        params = UpdateContractParams(
-            client_name=client.client_name,
-            contract_id=contract_id,
-            billing_prompt_next_date=kwargs.get('billing_prompt_next_date'),
-            status=kwargs.get('status'),
-            notes=kwargs.get('notes')
-        )
-        
-        result = update_contract_tool(params, context, db)
-        return result.model_dump()
-        
+            result = await session.execute(select(Client).where(Client.client_id == contract.client_id))
+            client = result.scalar_one_or_none()
+            if not client:
+                return {
+                    "success": False,
+                    "message": f"❌ Client for contract ID {contract_id} not found."
+                }
+            
+            # Use the existing update_contract_tool with client name
+            params = UpdateContractParams(
+                client_name=client.client_name,
+                contract_id=contract_id,
+                billing_prompt_next_date=kwargs.get('billing_prompt_next_date'),
+                status=kwargs.get('status'),
+                notes=kwargs.get('notes')
+            )
+            
+            result = await update_contract_tool(params, context)
+            return result.model_dump()
+            
     except Exception as e:
         return {
             "success": False,
             "message": f"❌ Failed to update contract by ID: {str(e)}"
         }
 
-def _search_contracts_wrapper(**kwargs) -> Dict[str, Any]:
+async def _search_contracts_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for searching contracts by various criteria"""
-    db = kwargs.pop('db', None)
+    kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     params = SearchContractsParams(**kwargs)
-    result = search_contracts_tool(params, db)
+    result = await search_contracts_tool(params, context)
     return result.model_dump()
 
 # --- Employee Tool Wrappers ---
@@ -906,7 +912,7 @@ async def tool_executor_node(state: AgentState) -> Dict:
     It takes tool calls from the last message in the state, executes them, and returns the results.
     """
     # 🚀 PERFORMANCE OPTIMIZATION: Track tool execution for contract search optimization
-    import asyncio
+    
     
     last_message = state['messages'][-1]
     tool_calls = getattr(last_message, 'tool_calls', [])

@@ -12,7 +12,7 @@ interface TypewriterTextProps {
 
 export const TypewriterText: React.FC<TypewriterTextProps> = ({
   text,
-  speed = 30,
+  speed = 10, // Reduced from 30ms to 10ms for faster typing
   onComplete,
   className = "",
   style
