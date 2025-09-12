@@ -235,7 +235,7 @@ class TimeTrackerAgent:
                 messages=messages,
                 tools=self.tools,
                 tool_choice="auto",  # Let the LLM decide which tools to use
-                temperature=0.1,     # 🚀 OPTIMIZATION: Reduced from 0.7 to 0.1 for faster, more deterministic responses
+                temperature=0.3,     # 🚀 PHASE 2: Balanced for better natural language understanding
                 max_tokens=500,      # 🚀 OPTIMIZATION: Reduced from 1000 to 500 for faster generation
                 timeout=10.0         # 🚀 OPTIMIZATION: Added 10s timeout for faster failure detection
             )
@@ -266,7 +266,7 @@ class TimeTrackerAgent:
                 final_response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    temperature=0.1,     # 🚀 OPTIMIZATION: Reduced from 0.7 to 0.1 for faster, more deterministic responses
+                    temperature=0.3,     # 🚀 PHASE 2: Balanced for better natural language understanding
                     max_tokens=500,      # 🚀 OPTIMIZATION: Reduced from 1000 to 500 for faster generation
                     timeout=10.0         # 🚀 OPTIMIZATION: Added 10s timeout for faster failure detection
                 )

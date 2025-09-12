@@ -387,7 +387,7 @@ class EnhancedAgentNodeExecutor:
                 messages=prepared_messages,
                 tools=tools,
                 tool_choice="auto",
-                temperature=0.1,  # Keep low for deterministic, faster responses
+                temperature=0.3,  # Balanced: creative enough for variations, deterministic enough for tools
                 timeout=15.0,     # 🚀 OPTIMIZATION: Balanced timeout - sufficient for formatting, faster failure detection
                 max_tokens=2000   # 🚀 OPTIMIZATION: Increased to 2000 to handle multiple contract listings without truncation
             )
@@ -561,7 +561,7 @@ class EnhancedAgentNodeExecutor:
                 messages=prepared_messages,
                 tools=tools,
                 tool_choice="auto",
-                temperature=0.1,  # Keep low for deterministic, faster responses
+                temperature=0.3,  # Balanced: creative enough for variations, deterministic enough for tools
                 timeout=15.0,     # 🚀 OPTIMIZATION: Balanced timeout - sufficient for formatting, faster failure detection
                 max_tokens=2000   # 🚀 OPTIMIZATION: Increased to 2000 to handle multiple contract listings without truncation
             )

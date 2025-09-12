@@ -147,12 +147,14 @@ class ContractAgent:
                 "type": "function",
                 "function": {
                     "name": "update_contract",
-                    "description": "Update an existing contract for a client. Use this to modify contract details like billing dates, amounts, status, etc.",
+                    "description": "Update an existing contract for a client. Use this to modify contract details like billing dates, amounts, status, etc. If client has multiple contracts, will ask user to specify contract ID or say 'all' to update all contracts.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "client_name": {"type": "string", "description": "Name of the client whose contract to update"},
                             "contract_id": {"type": "integer", "description": "Specific contract ID to update (optional - will use most recent if not provided)"},
+                            "user_response": {"type": "string", "description": "User's response to contract selection prompt (e.g., '1', '2', '108', 'Contract 108', 'all', 'for both')"},
+                            "update_all": {"type": "boolean", "description": "Whether to update all contracts for the client (set to true when user says 'all', 'both', 'for all', etc.)"},
                             "start_date": {"type": "string", "description": "New start date in YYYY-MM-DD format"},
                             "end_date": {"type": "string", "description": "New end date in YYYY-MM-DD format"},
                             "contract_type": {"type": "string", "description": "New contract type: Fixed, Hourly, or Retainer"},

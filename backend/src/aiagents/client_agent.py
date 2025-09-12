@@ -65,6 +65,7 @@ MEMORY-ENHANCED BEHAVIOR:
                             "industry": {"type": "string", "description": "The industry the client operates in"},
                             "primary_contact_name": {"type": "string", "description": "Name of the primary contact"},
                             "primary_contact_email": {"type": "string", "description": "Email of the primary contact"},
+                            "user_confirmation": {"type": "string", "description": "User's confirmation when similar clients exist (e.g., 'yes', 'no', 'cancel')"},
                         },
                         "required": ["client_name"]
                     }

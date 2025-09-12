@@ -269,6 +269,21 @@ async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
     kwargs.pop('db', None)
     context = kwargs.pop('context', None)
     
+    # Replace placeholders with actual file data from context
+    if context and 'file_info' in context:
+        file_info = context['file_info']
+        
+        if kwargs.get('file_data') == "<base64_encoded_data>":
+            kwargs['file_data'] = file_info.get('file_data')
+            kwargs['filename'] = file_info.get('filename', kwargs.get('filename'))
+            kwargs['file_size'] = file_info.get('file_size', kwargs.get('file_size'))
+            kwargs['mime_type'] = file_info.get('mime_type', kwargs.get('mime_type'))
+            print(f"🔍 DEBUG: create_client_and_contract - Replaced placeholder with real file data: {len(kwargs['file_data'])} chars, size: {kwargs['file_size']}")
+        else:
+            print(f"🔍 DEBUG: create_client_and_contract - Using provided file data: {len(kwargs.get('file_data', ''))} chars")
+    else:
+        print(f"🔍 DEBUG: create_client_and_contract - No file_info in context")
+    
     try:
         # First create the client
         client_params = CreateClientParams(

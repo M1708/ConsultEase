@@ -153,7 +153,7 @@ If the request is a simple greeting, use handle_greeting.
                 messages=messages,
                 tools=self.get_routing_functions(),
                 tool_choice="auto",
-                temperature=0.1,     # Keep low for deterministic routing
+                temperature=0.3,     # Balanced: creative enough for variations, deterministic enough for routing
                 timeout=10.0,        # 🚀 OPTIMIZATION: Added 10s timeout for faster failure detection
                 max_tokens=200       # 🚀 OPTIMIZATION: Reduced to 200 for faster routing decisions
             )

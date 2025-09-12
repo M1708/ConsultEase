@@ -515,6 +515,7 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
             
             user_id = context['user_id']
             
+            
             resolved_profile_id = params.profile_id
             
             # TODO: OPTIMIZATION - Efficient profile search with indexed fields only
