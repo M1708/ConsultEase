@@ -41,7 +41,7 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
 
   return (
     <div className={`whitespace-pre-wrap ${className}`} style={style}>
-      {displayedText}
+      <div dangerouslySetInnerHTML={{ __html: displayedText }} />
       {currentIndex < text.length && (
         <span className="animate-pulse">|</span>
       )}

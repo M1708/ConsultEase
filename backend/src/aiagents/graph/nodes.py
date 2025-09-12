@@ -1169,7 +1169,16 @@ class EnhancedAgentNodeExecutor:
                 response += f"- **Client Name:** {client.get('client_name', 'N/A')}\n"
                 response += f"- **Industry:** {client.get('industry', 'N/A')}\n"
                 response += f"- **Primary Contact Name:** {client.get('primary_contact_name', 'N/A')}\n"
-                response += f"- **Primary Contact Email:** {client.get('primary_contact_email', 'N/A')}\n"
+                # Extract plain email from markdown format if present
+                email_raw = client.get('primary_contact_email', 'N/A')
+                if email_raw != 'N/A' and '[' in email_raw and '](' in email_raw:
+                    # Extract email from markdown format [email](mailto:email)
+                    import re
+                    email_match = re.search(r'\[([^\]]+)\]\([^)]+\)', email_raw)
+                    email_plain = email_match.group(1) if email_match else email_raw
+                else:
+                    email_plain = email_raw
+                response += f"- **Primary Contact Email:** {email_plain}\n"
                 response += f"- **Company Size:** {client.get('company_size', 'N/A')}\n\n"
                 
                 if contracts:
@@ -1184,7 +1193,27 @@ class EnhancedAgentNodeExecutor:
                     response += f"- **Next Billing Prompt Date:** {contract.get('billing_prompt_next_date', 'N/A')}\n"
                     response += f"- **Start Date:** {contract.get('start_date', 'N/A')}\n"
                     response += f"- **End Date:** {contract.get('end_date', 'N/A')}\n"
-                    response += f"- **Notes:** {contract.get('notes', 'N/A')}\n\n"
+                    response += f"- **Notes:** {contract.get('notes', 'N/A')}\n"
+                    
+                    # Add document information if available
+                    if contract.get('document_filename'):
+                        response += f"- **Document:** [{contract.get('document_filename')}]({contract.get('document_download_url', '#')})\n"
+                        if contract.get('document_file_size'):
+                            file_size_bytes = contract.get('document_file_size')
+                            if file_size_bytes < 1024:
+                                response += f"- **Document Size:** {file_size_bytes} bytes\n"
+                            elif file_size_bytes < 1024 * 1024:
+                                file_size_kb = file_size_bytes / 1024
+                                response += f"- **Document Size:** {file_size_kb:.1f} KB\n"
+                            else:
+                                file_size_mb = file_size_bytes / (1024 * 1024)
+                                response += f"- **Document Size:** {file_size_mb:.2f} MB\n"
+                        if contract.get('document_uploaded_at'):
+                            response += f"- **Document Uploaded:** {contract.get('document_uploaded_at')}\n"
+                    else:
+                        response += f"- **Document:** No document uploaded\n"
+                    
+                    response += "\n"
                 
                 response += "If you need any further information or assistance, feel free to ask!"
                 return response
@@ -1308,7 +1337,15 @@ class EnhancedAgentNodeExecutor:
                     response += f"- **Type:** {contract.get('contract_type', 'N/A')}\n"
                     response += f"- **Status:** {contract.get('status', 'N/A')}\n"
                     response += f"- **Amount:** ${contract.get('original_amount', 0):,.2f}\n"
-                    response += f"- **Next Billing:** {contract.get('billing_prompt_next_date', 'N/A')}\n\n"
+                    response += f"- **Next Billing:** {contract.get('billing_prompt_next_date', 'N/A')}\n"
+                    
+                    # Add document information if available
+                    if contract.get('document_filename'):
+                        response += f"- **Document:** [{contract.get('document_filename')}]({contract.get('document_download_url', '#')})\n"
+                    else:
+                        response += f"- **Document:** No document uploaded\n"
+                    
+                    response += "\n"
                 
                 response += "If you need more details about a specific contract or want to perform other operations, feel free to ask!"
                 return response
@@ -1325,7 +1362,16 @@ class EnhancedAgentNodeExecutor:
                     response += f"### {i}. {client.get('client_name', 'Unknown')}\n"
                     response += f"- **Industry:** {client.get('industry', 'N/A')}\n"
                     response += f"- **Primary Contact:** {client.get('primary_contact_name', 'N/A')}\n"
-                    response += f"- **Contact Email:** {client.get('primary_contact_email', 'N/A')}\n"
+                    # Extract plain email from markdown format if present
+                    email_raw = client.get('primary_contact_email', 'N/A')
+                    if email_raw != 'N/A' and '[' in email_raw and '](' in email_raw:
+                        # Extract email from markdown format [email](mailto:email)
+                        import re
+                        email_match = re.search(r'\[([^\]]+)\]\([^)]+\)', email_raw)
+                        email_plain = email_match.group(1) if email_match else email_raw
+                    else:
+                        email_plain = email_raw
+                    response += f"- **Contact Email:** {email_plain}\n"
                     response += f"- **Company Size:** {client.get('company_size', 'N/A')}\n\n"
                 
                 response += "If you need more details about a specific client or want to perform other operations, feel free to ask!"
@@ -1344,7 +1390,15 @@ class EnhancedAgentNodeExecutor:
                     response += f"- **Client:** {contract.get('client_name', 'N/A')}\n"
                     response += f"- **Type:** {contract.get('contract_type', 'N/A')}\n"
                     response += f"- **Status:** {contract.get('status', 'N/A')}\n"
-                    response += f"- **Amount:** ${contract.get('original_amount', 0):,.2f}\n\n"
+                    response += f"- **Amount:** ${contract.get('original_amount', 0):,.2f}\n"
+                    
+                    # Add document information if available
+                    if contract.get('document_filename'):
+                        response += f"- **Document:** [{contract.get('document_filename')}]({contract.get('document_download_url', '#')})\n"
+                    else:
+                        response += f"- **Document:** No document uploaded\n"
+                    
+                    response += "\n"
                 
                 response += "If you need more details about a specific contract or want to perform other operations, feel free to ask!"
                 return response

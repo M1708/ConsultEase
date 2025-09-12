@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 from datetime import datetime
 from supabase import create_client, Client
 from fastapi import UploadFile, HTTPException
@@ -19,20 +20,30 @@ class SupabaseStorageService:
         self.supabase: Client = create_client(supabase_url, supabase_key)
         self.bucket_name = "contract-documents"
     
-    async def upload_contract_document(self, file: UploadFile, contract_id: int) -> Dict[str, Any]:
-        """Upload contract document to Supabase Storage"""
+    async def upload_contract_document(self, file, contract_id: int) -> Dict[str, Any]:
+        """Upload contract document to Supabase Storage - handles both UploadFile and BytesIO objects"""
         try:
+            # Handle both UploadFile and BytesIO objects
+            if hasattr(file, 'filename') and file.filename:
+                filename = file.filename
+                file_content = await file.read() if hasattr(file, 'read') and asyncio.iscoroutinefunction(file.read) else file.getvalue()
+                content_type = getattr(file, 'content_type', 'application/octet-stream')
+            elif hasattr(file, 'name') and file.name:
+                filename = file.name
+                file_content = file.getvalue() if hasattr(file, 'getvalue') else file.read()
+                content_type = 'application/octet-stream'
+            else:
+                raise HTTPException(status_code=400, detail="No filename provided")
+            
             # Validate file
-            if not file.filename:
+            if not filename:
                 raise HTTPException(status_code=400, detail="No filename provided")
             
             # Generate unique filename
-            file_extension = file.filename.split('.')[-1] if '.' in file.filename else ''
+            file_extension = filename.split('.')[-1] if '.' in filename else ''
             unique_filename = f"contract_{contract_id}_{uuid.uuid4().hex}.{file_extension}"
             file_path = f"contracts/{contract_id}/{unique_filename}"
             
-            # Read file content
-            file_content = await file.read()
             file_size = len(file_content)
             
             # Upload to Supabase Storage
@@ -40,7 +51,7 @@ class SupabaseStorageService:
                 path=file_path,
                 file=file_content,
                 file_options={
-                    "content-type": file.content_type,
+                    "content-type": content_type,
                     "upsert": False
                 }
             )
@@ -62,9 +73,9 @@ class SupabaseStorageService:
                 "success": True,
                 "file_path": file_path,
                 "public_url": public_url,
-                "filename": file.filename,
+                "filename": filename,
                 "file_size": file_size,
-                "mime_type": file.content_type,
+                "mime_type": content_type,
                 "uploaded_at": datetime.utcnow()
             }
             
@@ -361,6 +372,18 @@ class SupabaseStorageService:
         """Get signed URL for contract document access"""
         try:
             bucket_name = "employee-contract-documents"
+            response = self.supabase.storage.from_(bucket_name).create_signed_url(
+                path=file_path,
+                expires_in=expires_in
+            )
+            return response.get('signedURL', '')
+        except Exception:
+            return ''
+    
+    def get_contract_document_url(self, file_path: str, expires_in: int = 3600) -> str:
+        """Get signed URL for contract document access"""
+        try:
+            bucket_name = "contract-documents"
             response = self.supabase.storage.from_(bucket_name).create_signed_url(
                 path=file_path,
                 expires_in=expires_in

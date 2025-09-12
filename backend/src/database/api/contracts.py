@@ -253,15 +253,25 @@ async def delete_contract(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
-    """Delete a contract"""
+    """Delete a contract and its associated document"""
     result = await db.execute(select(Contract).filter(Contract.contract_id == contract_id))
     db_contract = result.scalar_one_or_none()
     if not db_contract:
         raise HTTPException(status_code=404, detail="Contract not found")
     
+    # Delete associated document if it exists
+    if db_contract.document_file_path:
+        try:
+            from src.services.storage_service import SupabaseStorageService
+            storage_service = SupabaseStorageService()
+            await storage_service.delete_contract_document(db_contract.document_file_path)
+        except Exception as e:
+            # Log the error but don't fail the contract deletion
+            print(f"Warning: Failed to delete document for contract {contract_id}: {str(e)}")
+    
     await db.delete(db_contract)
     await db.commit()
-    return {"message": "Contract deleted successfully"}
+    return {"message": "Contract and associated document deleted successfully"}
 
 # Additional contract-specific endpoints
 @router.get("/status/{status}", response_model=List[ContractResponse])

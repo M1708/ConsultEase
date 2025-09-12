@@ -15,8 +15,8 @@ class Client(Base):
     company_size = Column(String)  # e.g., "10-50", "50-200", "200+"
     industry = Column(String)
     notes = Column(Text)
-    created_by = Column(String)  # Will connect to user system later
-    updated_by = Column(String)
+    created_by = Column(UUID(as_uuid=True))
+    updated_by = Column(UUID(as_uuid=True))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
@@ -50,8 +50,8 @@ class Contract(Base):
     ai_analysis_data = Column(JSON)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    created_by = Column(String)
-    updated_by = Column(String)
+    created_by = Column(UUID(as_uuid=True))
+    updated_by = Column(UUID(as_uuid=True))
     
     # Relationship to client
     client = relationship("Client", back_populates="contracts")

@@ -117,6 +117,35 @@ MEMORY-ENHANCED BEHAVIOR:
             {
                 "type": "function",
                 "function": {
+                    "name": "get_contract_details",
+                    "description": "Get detailed information for a specific contract by contract ID or client name. Use this when user asks for 'contract details for contract 108', 'show me contract 108', or similar requests.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "contract_id": {"type": "integer", "description": "The specific contract ID to get details for"},
+                            "client_name": {"type": "string", "description": "The name of the client (alternative to contract_id)"}
+                        },
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_client_contracts",
+                    "description": "Get all contracts for a specific client. Use this when user asks for contract details, contract information, or anything related to a client's contracts.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {"type": "string", "description": "The name of the client whose contracts to retrieve"}
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "update_client",
                     "description": "Update an existing client's information like contact details, industry, notes, etc.",
                     "parameters": {
@@ -127,6 +156,89 @@ MEMORY-ENHANCED BEHAVIOR:
                             "primary_contact_name": {"type": "string", "description": "New primary contact person name"},
                             "primary_contact_email": {"type": "string", "description": "New primary contact email address"},
                             "notes": {"type": "string", "description": "New notes or comments about the client"}
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "upload_contract_document",
+                    "description": "Upload a document for a client's contract. Handles file upload and database updates. If client has multiple contracts, will ask user to specify contract ID. CRITICAL: Always extract client name from user message - look for patterns like 'for client [Name]', 'for [Name]', 'this is for [Name]'.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {"type": "string", "description": "Client name extracted from user message (e.g., 'Acme Corp' from 'for client Acme Corp'). REQUIRED when contract_id not provided."},
+                            "contract_id": {"type": "integer", "description": "Specific contract ID (optional - will use latest contract if not provided)"},
+                            "file_data": {"type": "string", "description": "Base64 encoded file content"},
+                            "filename": {"type": "string", "description": "Original filename"},
+                            "file_size": {"type": "integer", "description": "File size in bytes"},
+                            "mime_type": {"type": "string", "description": "MIME type of the file"}
+                        },
+                        "required": ["client_name", "file_data", "filename", "file_size", "mime_type"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "manage_contract_document",
+                    "description": "Get information about contract documents for a client. Use this to check if a contract has documents or to get document details.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {"type": "string", "description": "Name of the client"},
+                            "contract_id": {"type": "integer", "description": "Specific contract ID (optional)"},
+                            "document_action": {"type": "string", "description": "Action to perform: 'info', 'check', 'details'"}
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_contract_document",
+                    "description": "Delete contract document(s) for a client. Can delete all documents for a client or specific contract document.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {"type": "string", "description": "Name of the client"},
+                            "contract_id": {"type": "integer", "description": "Specific contract ID (optional - will delete all contract documents if not provided)"}
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_contract",
+                    "description": "Delete a contract for a client. If client has multiple contracts, will ask user to specify contract ID.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {"type": "string", "description": "Name of the client"},
+                            "contract_id": {"type": "integer", "description": "Specific contract ID (optional - will ask for clarification if multiple contracts exist)"},
+                            "delete_all": {"type": "boolean", "description": "Set to true to delete all contracts for the client (use when user says 'all')"},
+                            "user_response": {"type": "string", "description": "User's response to contract selection prompt (e.g., '1', '2', 'all')"}
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_client",
+                    "description": "Delete a client and all associated contracts, documents, and contacts. Requires confirmation.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {"type": "string", "description": "Name of the client to delete"},
+                            "confirm_deletion": {"type": "boolean", "description": "Must be true to confirm deletion (default: false)"},
+                            "user_response": {"type": "string", "description": "User's response to confirmation prompt (e.g., 'yes', 'confirm')"}
                         },
                         "required": ["client_name"]
                     }

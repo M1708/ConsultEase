@@ -17,10 +17,10 @@ from src.database.core.database import get_ai_db, get_db
 from src.aiagents.tools.contract_tools import (
     create_client_tool, search_clients_tool, get_all_clients_tool,
     get_contract_details_tool, analyze_contract_tool, smart_create_contract_tool,
-    smart_contract_document_tool, get_contracts_by_client_tool, get_all_contracts_tool,
+    smart_contract_document_tool, upload_contract_document_tool, delete_contract_document_tool, delete_contract_tool, delete_client_tool, get_contracts_by_client_tool, get_all_contracts_tool,
     get_all_clients_with_contracts_tool, get_contracts_by_billing_date_tool, update_contract_tool, 
     search_contracts_tool, get_contracts_for_next_month_billing_tool,
-    CreateClientParams, SmartContractParams, ContractDocumentParams, UpdateContractParams, SearchContractsParams, ContractToolResult
+    CreateClientParams, SmartContractParams, ContractDocumentParams, UploadContractDocumentParams, DeleteContractDocumentParams, DeleteContractParams, DeleteClientParams, UpdateContractParams, SearchContractsParams, ContractToolResult
 )
 from  src.aiagents.tools.client_tools import (
     update_client_tool as update_client_tool_client, UpdateClientParams as UpdateClientParamsClient, ClientToolResult,
@@ -188,6 +188,9 @@ async def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
 async def _get_contracts_for_next_month_billing_wrapper(**kwargs) -> Dict[str, Any]:
     kwargs.pop('db', None)
     context = kwargs.pop('context', None)
+    if context is None:
+        from datetime import date
+        context = {'today': date.today()}
     result = await get_contracts_for_next_month_billing_tool(context)
     return result.model_dump()
 
@@ -214,6 +217,46 @@ async def _smart_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
     kwargs.pop('db', None)
     params = ContractDocumentParams(**kwargs)
     result = await smart_contract_document_tool(params)
+    return result.model_dump()
+
+async def _upload_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
+    """Wrapper for uploading contract documents with file data replacement"""
+    kwargs.pop('db', None)
+    context = kwargs.pop('context', None)
+    
+    # Replace placeholders with actual file data from context
+    if context and 'file_info' in context:
+        file_info = context['file_info']
+        
+        if kwargs.get('file_data') == "<base64_encoded_data>":
+            kwargs['file_data'] = file_info.get('file_data')
+            kwargs['filename'] = file_info.get('filename', kwargs.get('filename'))
+            kwargs['file_size'] = file_info.get('file_size', kwargs.get('file_size'))
+            kwargs['mime_type'] = file_info.get('mime_type', kwargs.get('mime_type'))
+    
+    params = UploadContractDocumentParams(**kwargs)
+    result = await upload_contract_document_tool(params, context)
+    return result.model_dump()
+
+async def _delete_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
+    """Wrapper for deleting contract documents"""
+    kwargs.pop('db', None)
+    params = DeleteContractDocumentParams(**kwargs)
+    result = await delete_contract_document_tool(params)
+    return result.model_dump()
+
+async def _delete_contract_wrapper(**kwargs) -> Dict[str, Any]:
+    """Wrapper for deleting contracts"""
+    kwargs.pop('db', None)
+    params = DeleteContractParams(**kwargs)
+    result = await delete_contract_tool(params)
+    return result.model_dump()
+
+async def _delete_client_wrapper(**kwargs) -> Dict[str, Any]:
+    """Wrapper for deleting clients"""
+    kwargs.pop('db', None)
+    params = DeleteClientParams(**kwargs)
+    result = await delete_client_tool(params)
     return result.model_dump()
 
 async def _get_all_clients_with_contracts_wrapper(**kwargs) -> Dict[str, Any]:
@@ -255,15 +298,44 @@ async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
         
         contract_result = await smart_create_contract_tool(contract_params, context)
         
+        # Handle document upload if provided
+        document_result = None
+        if (contract_result.success and 
+            kwargs.get('file_data') and 
+            kwargs.get('filename') and 
+            kwargs.get('file_size') and 
+            kwargs.get('mime_type')):
+            
+            # Upload document for the newly created contract
+            upload_params = UploadContractDocumentParams(
+                client_name=kwargs.get('client_name'),
+                contract_id=contract_result.data.get('contract_id'),
+                file_data=kwargs.get('file_data'),
+                filename=kwargs.get('filename'),
+                file_size=kwargs.get('file_size'),
+                mime_type=kwargs.get('mime_type')
+            )
+            
+            document_result = await upload_contract_document_tool(upload_params, context)
+        
         # Enhanced response with comprehensive details
         if contract_result.success:
             # Extract all client details
             client_data = client_result.data or {}
             contract_data = contract_result.data or {}
             
+            # Build success message with document status
+            success_message = f"✅ Successfully created client '{kwargs.get('client_name')}' and contract. Client ID: {client_data.get('client_id')}, Contract ID: {contract_data.get('contract_id')}"
+            
+            if document_result:
+                if document_result.success:
+                    success_message += f"\n\n📄 **Document uploaded successfully:** {document_result.data.get('document_filename', 'Unknown')}"
+                else:
+                    success_message += f"\n\n⚠️ **Document upload failed:** {document_result.message}"
+            
             return {
                 "success": True,
-                "message": f"✅ Successfully created client '{kwargs.get('client_name')}' and contract. Client ID: {client_data.get('client_id')}, Contract ID: {contract_data.get('contract_id')}",
+                "message": success_message,
                 "data": {
                     "operation": "create_client_and_contract",
                     "client": {
@@ -307,7 +379,7 @@ async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
             "message": f"❌ Failed to create client and contract: {str(e)}"
         }
 
-async def _calculate_contract_duration(start_date: str, end_date: str) -> int:
+def _calculate_contract_duration(start_date: str, end_date: str) -> int:
     """Helper function to calculate contract duration in months"""
     try:
         if not start_date or not end_date:
@@ -372,7 +444,11 @@ async def _search_contracts_wrapper(**kwargs) -> Dict[str, Any]:
     context = kwargs.pop('context', None)
     params = SearchContractsParams(**kwargs)
     result = await search_contracts_tool(params, context)
-    return result.model_dump()
+    return {
+        "success": result.success,
+        "message": result.message,
+        "data": result.data
+    }
 
 # --- Employee Tool Wrappers ---
 async def _create_employee_wrapper(**kwargs) -> Dict[str, Any]:
@@ -883,6 +959,10 @@ TOOL_REGISTRY = {
     "get_contracts_for_next_month_billing": _get_contracts_for_next_month_billing_wrapper,
     "update_client": _update_client_wrapper,
     "manage_contract_document": _smart_contract_document_wrapper,
+    "upload_contract_document": _upload_contract_document_wrapper,
+    "delete_contract_document": _delete_contract_document_wrapper,
+    "delete_contract": _delete_contract_wrapper,
+    "delete_client": _delete_client_wrapper,
     "create_client_and_contract": _create_client_and_contract_wrapper,
     "update_contract_by_id": _update_contract_by_id_wrapper,
     

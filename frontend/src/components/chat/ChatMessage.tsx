@@ -48,7 +48,12 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
             </div>
           )}
 
-          <div className="whitespace-pre-wrap">{content}</div>
+          <div 
+            className="whitespace-pre-wrap"
+            dangerouslySetInnerHTML={isUser ? undefined : { __html: content }}
+          >
+            {isUser ? content : undefined}
+          </div>
 
           {message.data && Object.keys(message.data).length > 0 && (
             <div className="mt-2 pt-2 border-t border-gray-200">
