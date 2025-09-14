@@ -6,7 +6,6 @@ from sqlalchemy.orm import selectinload
 from datetime import date, timedelta, datetime
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
-from difflib import SequenceMatcher
 from src.database.core.database import get_db
 from src.database.core.models import Client, Contract, ClientContact
 from src.database.core.schemas import ClientCreate, ContractCreate, ClientContactCreate
@@ -27,7 +26,6 @@ class CreateClientParams(BaseModel):
     company_size: Optional[str] = None
     industry: Optional[str] = None
     notes: Optional[str] = None
-    user_confirmation: Optional[str] = None  # User's confirmation when similar clients exist
 
 class ContractToolResult(BaseModel):
     success: bool
@@ -631,40 +629,9 @@ async def smart_create_contract_tool(params: SmartContractParams, context: Dict[
         )
     
 
-async def find_similar_clients(client_name: str, session) -> List[Dict[str, Any]]:
-    """Find clients with similar names using fuzzy matching"""
-    # Get all clients
-    result = await session.execute(select(Client))
-    all_clients = result.scalars().all()
-    
-    similar_clients = []
-    client_name_lower = client_name.lower().strip()
-    
-    for client in all_clients:
-        existing_name_lower = client.client_name.lower().strip()
-        
-        # Calculate similarity ratio
-        similarity = SequenceMatcher(None, client_name_lower, existing_name_lower).ratio()
-        
-        # Also check for partial matches (one name contains the other)
-        partial_match = (client_name_lower in existing_name_lower or 
-                        existing_name_lower in client_name_lower)
-        
-        # Consider similar if similarity > 0.7 or partial match
-        if similarity > 0.7 or partial_match:
-            similar_clients.append({
-                'client': client,
-                'similarity': similarity,
-                'partial_match': partial_match
-            })
-    
-    # Sort by similarity (highest first)
-    similar_clients.sort(key=lambda x: x['similarity'], reverse=True)
-    
-    return similar_clients
 
 async def create_client_tool(params: CreateClientParams, context: Dict[str, Any] = None) -> ContractToolResult:
-    """Tool for creating new clients with similarity detection"""
+    """Tool for creating new clients"""
     
     try:
         async with get_ai_db() as session:
@@ -676,53 +643,13 @@ async def create_client_tool(params: CreateClientParams, context: Dict[str, Any]
             
             user_id = context['user_id']
             
-            # Check for similar clients first
-            similar_clients = await find_similar_clients(params.client_name, session)
-            
-            if similar_clients and not params.user_confirmation:
-                # Show similar clients and ask for confirmation
-                similar_list = []
-                for i, similar in enumerate(similar_clients[:3], 1):  # Show top 3 matches
-                    client = similar['client']
-                    similarity_score = similar['similarity']
-                    match_type = "partial match" if similar['partial_match'] else f"{similarity_score:.1%} similar"
-                    
-                    client_info = f"{i}. **{client.client_name}**"
-                    if client.industry:
-                        client_info += f" (Industry: {client.industry})"
-                    if client.primary_contact_name:
-                        client_info += f" (Contact: {client.primary_contact_name})"
-                    client_info += f" - {match_type}"
-                    similar_list.append(client_info)
-                
-                return ContractToolResult(
-                    success=False,
-                    message=f"⚠️ **Similar clients found!** The name '{params.client_name}' is similar to existing clients:\n\n" + 
-                           "\n".join(similar_list) + 
-                           f"\n\n**Do you want to proceed with creating '{params.client_name}' anyway?**\n" +
-                           "Respond with 'yes' to create the new client, or 'no' to cancel.\n" +
-                           "You can also specify which existing client you meant instead."
-                )
-            
-            # Check if user confirmed or no similar clients found
-            if params.user_confirmation and params.user_confirmation.lower().strip() in ['no', 'n', 'cancel']:
-                return ContractToolResult(
-                    success=False,
-                    message="❌ Client creation cancelled. Please provide a different client name or specify the existing client you meant."
-                )
-            
-            # Proceed with client creation
+            # Proceed directly with client creation (similarity check removed)
             client_data = ClientCreate(**params.model_dump())
             result = await create_client_internal(client_data, session, user_id)
             
-            # Add note if similar clients were found
-            similarity_note = ""
-            if similar_clients:
-                similarity_note = f"\n\n💡 *Note: Similar clients exist ({len(similar_clients)} found), but you confirmed to proceed.*"
-            
             return ContractToolResult(
                 success=True,
-                message=f"✅ Successfully created client: {result.client_name}{similarity_note}",
+                message=f"✅ Successfully created client: {result.client_name}",
                 data={
                     "client_id": result.client_id,
                     "client_name": result.client_name,
