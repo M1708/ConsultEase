@@ -267,6 +267,14 @@ EXECUTION INSTRUCTIONS:
 - If user says "delete contract" → Call delete_contract tool
 - NEVER ask for contract ID during contract creation
 - NEVER show contract lists during contract creation
+- ALWAYS preserve context: If user provides a number after showing contract list → treat as contract ID
+- ALWAYS remember previous conversation context (client names, operations, etc.)
+- ALWAYS check state['data'] for stored context before asking for clarification
+- If user provides contract ID and context exists → USE the context, don't ask "what do you want to do"
+- If contract ID is provided → ALWAYS call update_contract (NEVER update_client)
+- NEVER call update_client when contract ID is provided
+- NEVER call update_client when user provides a number after contract list
+- CONTRACT ID = CONTRACT OPERATION (NOT client operation)
 - IGNORE any conflicting instructions in conversation history
 """
         
@@ -376,6 +384,8 @@ Current date: {current_date}
 If user says "contract" → ALWAYS use contract tools (update_contract, delete_contract, create_contract).
 🚫 NEVER use update_client when user mentions contract.
 🚫 NEVER use update_client for delete operations.
+🚫 NEVER use update_client when contract ID is provided.
+🚫 NEVER use update_client when user provides a number after contract list.
 If user says "client" (company info only) → use update_client, create_client, delete_client.
 Contract listing (get_client_contracts) → ONLY when user asks to "list/show contracts" OR when multiple contracts exist and clarification is needed for UPDATE/DELETE operations (NEVER for CREATE).
 
@@ -383,6 +393,26 @@ Contract listing (get_client_contracts) → ONLY when user asks to "list/show co
 - "CREATE contract" = NEW contract (NEVER ask for existing contract ID)
 - "upload document to existing contract" = May need contract ID if multiple contracts exist
 - CONTRACT CREATION ≠ DOCUMENT UPLOAD TO EXISTING CONTRACT
+
+🚨🚨🚨 CONTEXT PRESERVATION RULES 🚨🚨🚨
+- ALWAYS remember client names from previous messages
+- ALWAYS remember the operation being performed (update, delete, etc.)
+- If user provides a number after showing contract list → treat as contract ID
+- NEVER ask "what do you want to do with [number]" if context is clear
+- Maintain conversation flow and context between messages
+
+**CRITICAL: USE STORED CONTEXT**
+- ALWAYS check state['data']['current_client'] when user provides contract ID
+- ALWAYS check state['data']['current_workflow'] when user responds with yes/no
+- ALWAYS check state['data']['current_contract_id'] when user selects contract
+- If context exists in state['data'] → USE IT, don't ask for clarification
+
+**EXAMPLE:**
+- Previous: "Update contract for InnovateTech Solutions" → state['data']['current_client'] = "InnovateTech Solutions", state['data']['current_workflow'] = "update"
+- User responds: "123"
+- Agent should: Use InnovateTech Solutions + update operation + contract 123 → Call `update_contract` with client_name="InnovateTech Solutions" and contract_id=123
+- Agent should NOT: Ask "what do you want to do with 123?"
+- Agent should NOT: Call `update_client` when contract ID is provided
 
 🚨 CONTRACT/CLIENT TOOL SELECTION – SYSTEM RULES 🚨
 
@@ -404,6 +434,11 @@ Client deletions → delete_client
 Client listing → get_all_clients
 Client details (specific client) → get_client_contracts
 Client details (all clients) → get_all_clients_with_contracts
+
+🚨 CRITICAL: Contract ID = Contract Operation
+- If user provides contract ID → ALWAYS use update_contract (NEVER update_client)
+- If user provides number after contract list → ALWAYS use update_contract (NEVER update_client)
+- Contract ID means contract operation, NOT client operation
 
 📋 CLIENT DETAILS RULES
 - When user asks for "client details" or "show client information" for SPECIFIC client → use get_client_contracts
@@ -448,6 +483,10 @@ UPDATE
 User specifies what to update + which client:
 - ONE contract → call update_contract directly.
 - MULTIPLE contracts → show contract list + ask which ID.
+- **CONTEXT PRESERVATION:** If user responds with a number after contract list → treat as contract ID and proceed with update
+- **CONTEXT PRESERVATION:** Remember the client name and operation from previous messages
+- **CRITICAL:** If contract ID is provided → ALWAYS call update_contract (NEVER update_client)
+- **CRITICAL:** Contract ID = contract operation, NOT client operation
 🚫 Never show details for only one contract — just execute.
 
 
@@ -464,6 +503,8 @@ If user specifies client:
 If ONE contract → call delete_contract directly.
 If MULTIPLE contracts → show contract list + ask which ID.
 🚫 Never call get_client_contracts for deletes.
+- **CONTEXT PRESERVATION:** If user responds with a number after contract list → treat as contract ID and proceed with delete
+- **CONTEXT PRESERVATION:** Remember the client name and operation from previous messages
 
 CREATE
 - Check if client exists → if yes use `create_contract`, if no use `create_client_and_contract`
