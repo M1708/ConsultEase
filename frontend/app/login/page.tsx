@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabase";
@@ -15,6 +15,7 @@ export default function LoginPage() {
 
   const { login, error: authError } = useAuth();
   const router = useRouter();
+  const emailInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     console.log("ENV CHECK:");
@@ -24,6 +25,13 @@ export default function LoginPage() {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "Present" : "Missing"
     );
   }, []);
+
+  // Auto-focus email input when component mounts
+  useEffect(() => {
+    if (emailInputRef.current && !showForgotPassword) {
+      emailInputRef.current.focus();
+    }
+  }, [showForgotPassword]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -228,6 +236,7 @@ export default function LoginPage() {
           style={{ display: "flex", flexDirection: "column", gap: "1rem" }}
         >
           <input
+            ref={emailInputRef}
             type="email"
             placeholder="Email"
             value={email}

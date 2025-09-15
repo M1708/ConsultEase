@@ -35,43 +35,35 @@ class ContextExtractor:
             r"^(\d+)$"  # Just a number
         ]
         
-        self.billing_date_patterns = [
-            r"billing\s+date\s+to\s+([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})",
-            r"next\s+billing\s+date\s+to\s+([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})",
-            r"billing\s+prompt\s+next\s+date\s+to\s+([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})",
-            r"update\s+.*?billing.*?to\s+([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})"
-        ]
+        # Note: Removed billing_date_patterns - let LLM handle date extraction for better flexibility
     
     def extract_context_from_user_message(self, user_message: str, existing_state: Dict[str, Any] = None) -> Dict[str, Any]:
         """Extract context from user message."""
         context = {}
-        
+
         # Extract contract ID first
         contract_id = self._extract_contract_id(user_message)
         if contract_id:
             context['current_contract_id'] = contract_id
-        
+
         # Only extract client name if we don't have a contract ID
         # If we have a contract ID, let the agent determine the client name by looking up the contract
         if not contract_id:
             client_name = self._extract_client_name(user_message)
             if client_name:
                 context['current_client'] = client_name
-        
+
         # Extract workflow/operation
         workflow = self._extract_workflow(user_message)
         if workflow:
             context['current_workflow'] = workflow
-        
-        # Extract billing date
-        billing_date = self._extract_billing_date(user_message)
-        if billing_date:
-            context['billing_prompt_next_date'] = billing_date
-        
+
+        # Note: Removed billing date extraction - let LLM handle this for better flexibility
+
         # Check if this is a new operation request (not just a contract ID response)
         is_new_operation = self._is_new_operation_request(user_message)
         print(f"🔍 DEBUG: Is new operation request: {is_new_operation} for message: '{user_message}'")
-        
+
         if is_new_operation:
             context['user_operation'] = self._extract_operation_type(user_message)
             context['original_user_request'] = user_message
@@ -83,7 +75,7 @@ class ContextExtractor:
                 # Don't extract user_operation, let the existing one be preserved
             else:
                 print(f"🔍 DEBUG: Not a new operation request (skipping user_operation extraction)")
-        
+
         return context
     
     def extract_context_from_agent_response(self, agent_response: str) -> Dict[str, Any]:
@@ -198,25 +190,6 @@ class ContextExtractor:
         else:
             return 'unknown'
     
-    def _extract_billing_date(self, text: str) -> Optional[str]:
-        """Extract billing date from user message."""
-        text_lower = text.lower()
-        
-        for pattern in self.billing_date_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                date_str = match.group(1)
-                # Convert date format from "Jan 15th 2026" to "2026-01-15"
-                try:
-                    from datetime import datetime
-                    # Parse the date string
-                    parsed_date = datetime.strptime(date_str.replace('st', '').replace('nd', '').replace('rd', '').replace('th', ''), "%b %d %Y")
-                    return parsed_date.strftime("%Y-%m-%d")
-                except ValueError:
-                    # If parsing fails, return the original string
-                    return date_str
-        
-        return None
     
     def update_state_with_context(self, state: AgentState, context: Dict[str, Any]) -> AgentState:
         """Update state with extracted context."""

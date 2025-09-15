@@ -421,11 +421,11 @@ export default function ChatPage() {
             }}
           >
             {/* User Name Section */}
-            <div className="p-4 bg-blue-50 flex-shrink-0">
+            <div className="p-4 bg-blue-50 flex-shrink-0 flex items-center justify-center min-h-[60px]">
               <div className="flex items-center space-x-2">
                 <div className="h-3 w-3 bg-green-500 rounded-full"></div>
                 <h3
-                  className="text-lg font-bold text-gray-900 truncate"
+                  className="text-lg font-bold text-gray-900 truncate text-center"
                   style={{ fontFamily: "Arial, sans-serif" }}
                 >
                   {user?.full_name ||

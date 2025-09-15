@@ -533,6 +533,7 @@ DELETE
 CRITICAL: Context Retention:
 -Remember client name from previous messages
 -Remember the operation user wanted to perform
+
 -Use contract_id when provided to complete the original reques
 If user specifies client:
 If ONE contract → call delete_contract directly.

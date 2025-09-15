@@ -1505,23 +1505,37 @@ class EnhancedAgentNodeExecutor:
     async def _should_short_circuit(self, state: AgentState, agent_name: str) -> bool:
         """Check if we should bypass LLM and call tool directly."""
         data = state.get('data', {})
-        
+
         # Check if we have the required context for direct tool execution
         has_user_operation = 'user_operation' in data
         has_client = 'current_client' in data
         has_contract_id = 'current_contract_id' in data
+        has_file_info = 'context' in state and state['context'].get('file_info')
         user_operation = data.get('user_operation')
-        
-        print(f"🔍 DEBUG: Short-circuit check - user_operation: {has_user_operation} ({user_operation}), client: {has_client}, contract_id: {has_contract_id}")
+
+        print(f"🔍 DEBUG: Short-circuit check - user_operation: {has_user_operation} ({user_operation}), client: {has_client}, contract_id: {has_contract_id}, file_info: {has_file_info}")
         print(f"🔍 DEBUG: Full state data: {data}")
-        
-        # If we have user operation and client, and this is a contract operation
-        if has_user_operation and has_client and user_operation in ['update_contract', 'delete_contract']:
-            print(f"🔍 DEBUG: Short-circuit conditions met for {user_operation}")
-            return True
-        else:
-            print(f"🔍 DEBUG: Short-circuit conditions NOT met")
-            
+
+        # Only short-circuit for simple cases: contract ID responses after a clear operation request
+        # This allows the LLM to handle complex field extraction and natural language variations
+
+        # Only short-circuit for simple cases: contract ID responses after a clear operation request
+        # This allows the LLM to handle complex field extraction and natural language variations
+        if (has_user_operation and has_client and has_contract_id and
+            user_operation in ['update_contract', 'delete_contract']):
+
+            # Check if this is a simple contract ID response (just a number)
+            messages = state.get('messages', [])
+            if messages:
+                last_message = messages[-1]
+                if hasattr(last_message, 'content'):
+                    last_content = last_message.content.strip()
+                    # Only short-circuit if the last message is just a contract ID (simple number)
+                    if last_content.isdigit():
+                        print(f"🔍 DEBUG: Short-circuiting LLM call - direct tool execution")
+                        return True
+
+        print(f"🔍 DEBUG: Short-circuit conditions NOT met - letting LLM handle the request")
         return False
     
     async def _execute_direct_tool_call(self, state: AgentState, agent_name: str) -> Dict:
@@ -1569,17 +1583,27 @@ class EnhancedAgentNodeExecutor:
             # Prepare tool arguments based on operation
             if user_operation == 'update_contract':
                 from ..tools.contract_tools import UpdateContractParams
-                billing_date = data.get('billing_prompt_next_date')
                 params = UpdateContractParams(
                     client_name=client_name,
-                    contract_id=int(contract_id) if contract_id else None,
-                    billing_prompt_next_date=billing_date
+                    contract_id=int(contract_id) if contract_id else None
+                    # Note: Let LLM handle other field extraction for better flexibility
                 )
             elif user_operation == 'delete_contract':
                 from ..tools.contract_tools import DeleteContractParams
                 params = DeleteContractParams(
                     client_name=client_name,
                     contract_id=int(contract_id) if contract_id else None
+                )
+            elif user_operation == 'upload_contract_document':
+                # Handle upload operation with preserved context
+                from ..tools.contract_tools import UploadContractDocumentParams
+                params = UploadContractDocumentParams(
+                    client_name=client_name,
+                    contract_id=int(contract_id) if contract_id else None,
+                    file_data=None,  # Will be filled by tool wrapper from context
+                    filename=None,   # Will be filled by tool wrapper from context
+                    file_size=None,  # Will be filled by tool wrapper from context
+                    mime_type=None   # Will be filled by tool wrapper from context
                 )
             else:
                 # For other operations, create basic params

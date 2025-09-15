@@ -258,16 +258,16 @@ class ContractAgent:
                 "type": "function",
                 "function": {
                     "name": "upload_contract_document",
-                    "description": "Upload a document for a client's contract. Handles file upload and database updates. If client has multiple contracts, will ask user to specify contract ID. CRITICAL: Always extract client name from user message - look for patterns like 'for client [Name]', 'for [Name]', 'this is for [Name]'.",
+                    "description": "Upload a document for a client's contract. Handles file upload and database updates. If client has multiple contracts, will ask user to specify contract ID. CRITICAL: Always extract client name from user message - look for patterns like 'for client [Name]', 'for [Name]', 'this is for [Name]'. IMPROVED: Enhanced parameter validation and file data handling to prevent upload failures.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "client_name": {"type": "string", "description": "Client name extracted from user message (e.g., 'Acme Corp' from 'for client Acme Corp'). REQUIRED when contract_id not provided."},
                             "contract_id": {"type": "integer", "description": "Specific contract ID (optional - will use latest contract if not provided)"},
-                            "file_data": {"type": "string", "description": "Base64 encoded file content"},
-                            "filename": {"type": "string", "description": "Original filename"},
-                            "file_size": {"type": "integer", "description": "File size in bytes"},
-                            "mime_type": {"type": "string", "description": "MIME type of the file"}
+                            "file_data": {"type": "string", "description": "Base64 encoded file content - must be valid base64 string"},
+                            "filename": {"type": "string", "description": "Original filename with extension"},
+                            "file_size": {"type": "integer", "description": "File size in bytes - must be positive integer"},
+                            "mime_type": {"type": "string", "description": "MIME type of the file (e.g., 'application/pdf', 'application/msword')"}
                         },
                         "required": ["client_name", "file_data", "filename", "file_size", "mime_type"]
                     }

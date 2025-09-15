@@ -72,9 +72,6 @@ class UpdateContractParams(BaseModel):
 async def update_specific_contract(contract: Contract, params: UpdateContractParams, session) -> ContractToolResult:
     """Update a specific contract with the provided parameters"""
     try:
-        print(f"🔍 DEBUG: update_specific_contract called for contract {contract.contract_id}")
-        print(f"🔍 DEBUG: Update params: {params}")
-        
         updated_fields = []
         
         # Update contract fields if provided
@@ -104,8 +101,6 @@ async def update_specific_contract(contract: Contract, params: UpdateContractPar
             contract.notes = params.notes
             updated_fields.append("notes")
         
-        print(f"🔍 DEBUG: Updated fields: {updated_fields}")
-        
         # Update the updated_at timestamp
         contract.updated_at = datetime.utcnow()
         
@@ -114,8 +109,6 @@ async def update_specific_contract(contract: Contract, params: UpdateContractPar
         message = f"✅ Successfully updated contract {contract.contract_id} for {contract.client.client_name}"
         if updated_fields:
             message += f". Updated fields: {', '.join(updated_fields)}"
-        
-        print(f"🔍 DEBUG: Returning message: {message}")
         
         return ContractToolResult(
             success=True,
@@ -146,10 +139,6 @@ async def update_specific_contract(contract: Contract, params: UpdateContractPar
 async def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] = None) -> ContractToolResult:
     """Tool for updating existing contracts by client name"""
     try:
-        print(f"🔍 DEBUG: Update contract tool called")
-        print(f"🔍 DEBUG: Params: {params}")
-        print(f"🔍 DEBUG: Context: {context}")
-        
         async with get_ai_db() as session:
             if not context or 'user_id' not in context:
                 return ContractToolResult(
@@ -161,34 +150,26 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
             
             # If we have a specific contract_id, update that contract directly
             if params.contract_id:
-                print(f"🔍 DEBUG: Using contract_id path for contract {params.contract_id}")
                 contract_result = await session.execute(select(Contract).options(
                     selectinload(Contract.client)
                 ).filter(Contract.contract_id == params.contract_id))
                 
                 contract = contract_result.scalar_one_or_none()
                 if not contract:
-                    print(f"🔍 DEBUG: Contract {params.contract_id} not found")
                     return ContractToolResult(
                         success=False,
                         message=f"❌ Contract with ID {params.contract_id} not found."
                     )
                 
-                print(f"🔍 DEBUG: Found contract {contract.contract_id}, calling update_specific_contract")
                 # Update the specific contract
-                result = await update_specific_contract(contract, params, session)
-                print(f"🔍 DEBUG: update_specific_contract returned: {result.message}")
-                return result
+                return await update_specific_contract(contract, params, session)
             
             # If no contract_id provided, we need client_name to find contracts
             if not params.client_name:
-                print(f"🔍 DEBUG: No contract_id and no client_name provided")
                 return ContractToolResult(
                     success=False,
                     message="❌ Either contract_id or client_name must be provided."
                 )
-            
-            print(f"🔍 DEBUG: Using client_name path for client {params.client_name}")
             
             client = await get_client_by_name(params.client_name, session)
             if not client:

@@ -221,19 +221,40 @@ async def _smart_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
 
 async def _upload_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
     """Wrapper for uploading contract documents with file data replacement"""
+    # REVERT: If parameter handling issues persist, revert to original logic
     kwargs.pop('db', None)
     context = kwargs.pop('context', None)
-    
-    # Replace placeholders with actual file data from context
+
+    # ENHANCED PARAMETER HANDLING: Better file data replacement and validation
     if context and 'file_info' in context:
         file_info = context['file_info']
-        
+
+        # Replace placeholders with actual file data from context
         if kwargs.get('file_data') == "<base64_encoded_data>":
             kwargs['file_data'] = file_info.get('file_data')
             kwargs['filename'] = file_info.get('filename', kwargs.get('filename'))
             kwargs['file_size'] = file_info.get('file_size', kwargs.get('file_size'))
             kwargs['mime_type'] = file_info.get('mime_type', kwargs.get('mime_type'))
-    
+
+        # Ensure all required parameters are present
+        required_params = ['client_name', 'file_data', 'filename', 'file_size', 'mime_type']
+        missing_params = [param for param in required_params if not kwargs.get(param)]
+
+        if missing_params:
+            return {
+                "success": False,
+                "message": f"❌ Missing required parameters: {', '.join(missing_params)}",
+                "data": None
+            }
+
+        # Validate file data format
+        if kwargs.get('file_data') and not isinstance(kwargs['file_data'], str):
+            return {
+                "success": False,
+                "message": "❌ File data must be a base64 encoded string",
+                "data": None
+            }
+
     params = UploadContractDocumentParams(**kwargs)
     result = await upload_contract_document_tool(params, context)
     return result.model_dump()
@@ -1070,26 +1091,54 @@ async def tool_executor_node(state: AgentState) -> Dict:
 
 def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
     """Validate and correct tool selection based on current workflow."""
-    
+    # REVERT: If infinite loop issues persist, revert to original validation logic
+
     # Define allowed tools for each workflow
     ALLOWED_TOOLS = {
-        'update': ['update_contract'],
-        'delete': ['delete_contract'],
-        'create': ['create_contract', 'create_client_and_contract'],
+        'update': ['update_contract', 'update_contract_by_id'],
+        'delete': ['delete_contract', 'delete_contract_document'],
+        'create': ['create_contract', 'create_client_and_contract', 'create_client'],
         'upload': ['upload_contract_document'],
-        'show': ['get_contracts_by_client', 'get_client_details']
+        'show': ['get_contracts_by_client', 'get_client_details', 'get_contract_details'],
+        'search': ['search_contracts', 'search_clients']
     }
-    
+
     # Get current workflow from state
     current_workflow = state.get('data', {}).get('user_operation', '').split('_')[0]  # Extract 'update' from 'update_contract'
     allowed_tools = ALLOWED_TOOLS.get(current_workflow, [])
-    
+
     print(f"🔍 DEBUG: Tool validation - tool: {tool_name}, workflow: {current_workflow}, allowed: {allowed_tools}")
-    
+
     # If tool is not in allowed list, correct it
     if allowed_tools and tool_name not in allowed_tools:
         corrected_tool = allowed_tools[0]  # Use first allowed tool
         print(f"🔍 DEBUG: Tool corrected from {tool_name} to {corrected_tool}")
         return corrected_tool
+     
+    
+    # PARAMETER CORRECTION: Fix common parameter issues that could cause infinite loops
+    # REVERT: If parameter correction causes issues, revert to basic tool validation
+    if tool_name == "update_contract" and not state.get("data", {}).get("client_name"):
+        # If updating contract but no client specified, switch to search mode
+        print(f"🔍 DEBUG: Parameter correction - switching {tool_name} to search_contracts due to missing client_name")
+        return "search_contracts"
+    
+    if tool_name == "upload_contract_document" and not state.get("data", {}).get("file_info"):
+        # If uploading document but no file info, this could cause issues
+        print(f"🔍 DEBUG: Parameter correction - upload_contract_document missing file_info")
+        # Let it proceed but log the issue
+    
+    # WORKFLOW CONSISTENCY: Ensure tool selection matches user intent
+    user_intent = state.get("data", {}).get("user_operation", "")
+    if user_intent.startswith("create") and tool_name.startswith("update"):
+        corrected_tool = "create_contract" if "contract" in user_intent else "create_client"
+        print(f"🔍 DEBUG: Workflow correction - changing {tool_name} to {corrected_tool} for {user_intent}")
+        return corrected_tool
+    
+    if user_intent.startswith("update") and tool_name.startswith("create"):
+        corrected_tool = "update_contract" if "contract" in user_intent else "update_client"
+        print(f"🔍 DEBUG: Workflow correction - changing {tool_name} to {corrected_tool} for {user_intent}")
+        return corrected_tool
     
     return tool_name
+# REVERT MARKERS ADDED - All infinite loop fixes include rollback instructions

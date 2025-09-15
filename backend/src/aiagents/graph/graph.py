@@ -118,10 +118,30 @@ def after_agent_execution(state: AgentState) -> str:
 def after_tool_execution(state: AgentState) -> str:
     """Decides whether to continue with the agent or end the conversation."""
     # 🚀 PERFORMANCE OPTIMIZATION: Track execution flow for contract search optimization
-    
+    # REVERT: If infinite loop issues persist, revert to original logic
+
     print(f"🔍 DEBUG: after_tool_execution - state['data'] = {state.get('data', {})}")
     print(f"🔍 DEBUG: after_tool_execution - user_operation = {state.get('data', {}).get('user_operation', 'NOT_FOUND')}")
-    
+
+    # LOOP PREVENTION: Track tool execution cycles to prevent infinite loops
+    if 'tool_execution_count' not in state.get('data', {}):
+        state['data']['tool_execution_count'] = 0
+    state['data']['tool_execution_count'] += 1
+
+    # If we've executed too many tools in this conversation, end it
+    if state['data']['tool_execution_count'] > 5:
+        print(f"🛑 LOOP PREVENTION: Ending conversation after {state['data']['tool_execution_count']} tool executions")
+        return END
+
+    # Check if the last tool result indicates completion
+    last_message = state['messages'][-1] if state['messages'] else None
+    if last_message and hasattr(last_message, 'content'):
+        content = last_message.content.lower()
+        # If tool result indicates success or completion, end conversation
+        if any(keyword in content for keyword in ['successfully', 'completed', 'updated', 'created', 'uploaded']):
+            print("🛑 LOOP PREVENTION: Tool execution completed successfully, ending conversation")
+            return END
+
     # CRITICAL FIX: After tool execution, always return to the current agent
     # so it can process and format the tool results
     return state["current_agent"]
