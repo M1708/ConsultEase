@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from .state import AgentState
+from .context_extractor import context_extractor
 from ..memory.conversation_memory import ConversationMemoryManager
 from ..memory.context_manager import ContextManager
 from ..orchestration.dynamic_prompts import get_dynamic_instructions, PromptTemplate
@@ -67,6 +68,9 @@ class EnhancedAgentNodeExecutor:
         agent_name: str,
         execution_context: Optional[Dict[str, Any]] = None
     ) -> Dict:
+        """Phase 2 Enhanced invocation with dynamic prompts and intelligent caching."""
+        print(f"🔍 DEBUG: Agent invoke called - state['data'] = {state.get('data', {})}")
+        print(f"🔍 DEBUG: Agent invoke called - user_operation = {state.get('data', {}).get('user_operation', 'NOT_FOUND')}")
         """
         Phase 2 Enhanced invocation with dynamic prompts and intelligent caching.
         
@@ -97,6 +101,9 @@ class EnhancedAgentNodeExecutor:
                 agent_name, state, execution_context
             )
             
+            # DEBUG: Show system prompt length (removed full prompt to reduce clutter)
+            print(f"🔍 DEBUG: System prompt length for {agent_name}: {len(system_prompt)} characters")
+            
             print(f"🚀 Invoking {agent_name} with Phase 2 dynamic context...")
             print(f"🔍 DEBUG: Message count: {len(state.get('messages', []))}")
             last_msg = state.get('messages', [])[-1] if state.get('messages') else None
@@ -116,6 +123,26 @@ class EnhancedAgentNodeExecutor:
                 state, system_prompt
             )
             
+            # DEBUG: Show message count being sent to LLM (removed full messages to reduce clutter)
+            print(f"🔍 DEBUG: Messages being sent to LLM: {len(prepared_messages)} messages")
+            
+            
+            # Always extract context from user messages to preserve conversation context
+            # This ensures the agent knows what operation to perform
+            await self._extract_and_save_context(state, prepared_messages, None)
+            
+            # If we have a contract ID but no client name, look up the contract to get the client name
+            if (state.get('data', {}).get('current_contract_id') and 
+                not state.get('data', {}).get('current_client')):
+                await self._lookup_contract_and_save_client_name(state)
+            
+            # SHORT-CIRCUIT: If we have all context needed, bypass LLM and call tool directly
+            print(f"🔍 DEBUG: Checking short-circuit conditions after context extraction")
+            if await self._should_short_circuit(state, agent_name):
+                print(f"🔍 DEBUG: Short-circuiting LLM call - direct tool execution")
+                return await self._execute_direct_tool_call(state, agent_name)
+            else:
+                print(f"🔍 DEBUG: Proceeding with LLM call")
             
             # Execute with performance monitoring
             response = await self._execute_with_monitoring(
@@ -123,6 +150,12 @@ class EnhancedAgentNodeExecutor:
             )
             
             response_message = response.choices[0].message
+            
+            # DEBUG: Show current state after context extraction
+            print(f"🔍 DEBUG: State after context extraction:")
+            print(f"🔍 DEBUG: state['data'] = {state.get('data', {})}")
+            print(f"🔍 DEBUG: user_operation = {state.get('data', {}).get('user_operation', 'NOT_FOUND')}")
+            print(f"🔍 DEBUG: original_user_request = {state.get('data', {}).get('original_user_request', 'NOT_FOUND')}")
             
             # TODO: DEBUG - Debug tool calls to track recursion issue
             if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
@@ -160,6 +193,8 @@ class EnhancedAgentNodeExecutor:
                 cache_ttl = self._determine_cache_ttl(response_message.content)
                 await set_cached(cache_key, result, cache_ttl)
             
+            print(f"🔍 DEBUG: Agent invoke returning - state['data'] = {state.get('data', {})}")
+            print(f"🔍 DEBUG: Agent invoke returning - user_operation = {state.get('data', {}).get('user_operation', 'NOT_FOUND')}")
             return result
             
         except Exception as e:
@@ -1411,7 +1446,205 @@ class EnhancedAgentNodeExecutor:
         # Default formatting
         return result.get('message', 'Operation completed successfully.')
     
+    async def _extract_and_save_context(
+        self, 
+        state: AgentState, 
+        prepared_messages: List[Dict[str, str]], 
+        response_message
+    ):
+        """Extract context from user messages and agent response, then save to state['data']."""
+        try:
+            print(f"🔍 DEBUG: Starting context extraction...")
+            print(f"🔍 DEBUG: Prepared messages count: {len(prepared_messages)}")
+            
+            # Extract context from user messages
+            user_context = {}
+            has_new_user_message = False
+            
+            for i, msg in enumerate(prepared_messages):
+                if msg.get('role') == 'user':
+                    # Skip tool results that might be formatted as user messages
+                    content = msg['content']
+                    if content.startswith("Tool '") and "result:" in content:
+                        print(f"🔍 DEBUG: Skipping tool result message: {content[:100]}...")
+                        continue
+                    
+                    print(f"🔍 DEBUG: Processing user message {i}: {content[:100]}...")
+                    user_msg_context = context_extractor.extract_context_from_user_message(content, state.get('data', {}))
+                    print(f"🔍 DEBUG: Extracted from user message: {user_msg_context}")
+                    user_context.update(user_msg_context)
+                    has_new_user_message = True
+            
+            # Only extract context from agent response if there was a new user message and response_message exists
+            agent_context = {}
+            if has_new_user_message and response_message and hasattr(response_message, 'content') and response_message.content:
+                print(f"🔍 DEBUG: Processing agent response: {response_message.content[:100]}...")
+                agent_context = context_extractor.extract_context_from_agent_response(response_message.content)
+                print(f"🔍 DEBUG: Extracted from agent response: {agent_context}")
+            elif not has_new_user_message:
+                print(f"🔍 DEBUG: No new user message, skipping context extraction to preserve existing context")
+                print(f"🔍 DEBUG: Preserving existing context: {state.get('data', {})}")
+                return
+            
+            # Combine all context
+            all_context = {**user_context, **agent_context}
+            print(f"🔍 DEBUG: Combined context: {all_context}")
+            print(f"🔍 DEBUG: User context keys: {list(user_context.keys())}")
+            print(f"🔍 DEBUG: Agent context keys: {list(agent_context.keys())}")
+            
+            # Update state with context
+            if all_context:
+                context_extractor.update_state_with_context(state, all_context)
+                print(f"🔍 DEBUG: Context extraction completed: {list(all_context.keys())}")
+            else:
+                print(f"🔍 DEBUG: No context extracted from messages")
+                
+        except Exception as e:
+            print(f"🔍 DEBUG: Error in context extraction: {e}")
+    
+    async def _should_short_circuit(self, state: AgentState, agent_name: str) -> bool:
+        """Check if we should bypass LLM and call tool directly."""
+        data = state.get('data', {})
+        
+        # Check if we have the required context for direct tool execution
+        has_user_operation = 'user_operation' in data
+        has_client = 'current_client' in data
+        has_contract_id = 'current_contract_id' in data
+        user_operation = data.get('user_operation')
+        
+        print(f"🔍 DEBUG: Short-circuit check - user_operation: {has_user_operation} ({user_operation}), client: {has_client}, contract_id: {has_contract_id}")
+        print(f"🔍 DEBUG: Full state data: {data}")
+        
+        # If we have user operation and client, and this is a contract operation
+        if has_user_operation and has_client and user_operation in ['update_contract', 'delete_contract']:
+            print(f"🔍 DEBUG: Short-circuit conditions met for {user_operation}")
+            return True
+        else:
+            print(f"🔍 DEBUG: Short-circuit conditions NOT met")
+            
+        return False
+    
+    async def _execute_direct_tool_call(self, state: AgentState, agent_name: str) -> Dict:
+        """Execute tool directly without LLM when we have all context."""
+        data = state.get('data', {})
+        user_operation = data.get('user_operation')
+        client_name = data.get('current_client')
+        contract_id = data.get('current_contract_id')
+        original_request = data.get('original_user_request', '')
+        
+        print(f"🔍 DEBUG: Direct tool execution - {user_operation} for {client_name} with contract {contract_id}")
+        
+        # Map user operation to tool function
+        tool_mapping = {
+            'update_contract': 'update_contract_tool',
+            'delete_contract': 'delete_contract_tool',
+            'create_contract': 'create_contract_tool',
+            'upload_contract_document': 'upload_contract_document_tool'
+        }
+        
+        tool_name = tool_mapping.get(user_operation)
+        if not tool_name:
+            print(f"🔍 DEBUG: No tool mapping for {user_operation}")
+            return {"messages": [{"role": "assistant", "content": f"I don't know how to handle {user_operation} operation."}]}
+        
+        # Import the tool function
+        from ..tools.contract_tools import (
+            update_contract_tool, delete_contract_tool, 
+            smart_create_contract_tool, upload_contract_document_tool
+        )
+        
+        tool_functions = {
+            'update_contract_tool': update_contract_tool,
+            'delete_contract_tool': delete_contract_tool,
+            'create_contract_tool': smart_create_contract_tool,
+            'upload_contract_document_tool': upload_contract_document_tool
+        }
+        
+        tool_function = tool_functions.get(tool_name)
+        if not tool_function:
+            print(f"🔍 DEBUG: Tool function not found: {tool_name}")
+            return {"messages": [{"role": "assistant", "content": f"Tool function {tool_name} not found."}]}
+        
+        try:
+            # Prepare tool arguments based on operation
+            if user_operation == 'update_contract':
+                from ..tools.contract_tools import UpdateContractParams
+                billing_date = data.get('billing_prompt_next_date')
+                params = UpdateContractParams(
+                    client_name=client_name,
+                    contract_id=int(contract_id) if contract_id else None,
+                    billing_prompt_next_date=billing_date
+                )
+            elif user_operation == 'delete_contract':
+                from ..tools.contract_tools import DeleteContractParams
+                params = DeleteContractParams(
+                    client_name=client_name,
+                    contract_id=int(contract_id) if contract_id else None
+                )
+            else:
+                # For other operations, create basic params
+                params = {"client_name": client_name, "user_response": contract_id}
+            
+            # Call the tool directly
+            print(f"🔍 DEBUG: Calling {tool_name} with params: {params}")
+            result = await tool_function(params, state.get('context', {}))
+            
+            # Format the result as a message
+            if hasattr(result, 'message'):
+                response_content = result.message
+            elif isinstance(result, dict) and 'message' in result:
+                response_content = result['message']
+            else:
+                response_content = str(result)
+            
+            print(f"🔍 DEBUG: Direct tool execution result: {response_content}")
+            
+            return {"messages": [{"role": "assistant", "content": response_content}]}
+            
+        except Exception as e:
+            print(f"🔍 DEBUG: Error in direct tool execution: {e}")
+            return {"messages": [{"role": "assistant", "content": f"Error executing {user_operation}: {str(e)}"}]}
 
+    async def _lookup_contract_and_save_client_name(self, state: AgentState):
+        """Look up contract details by ID and save client name in context."""
+        try:
+            contract_id = state.get('data', {}).get('current_contract_id')
+            if not contract_id:
+                return
+            
+            print(f"🔍 DEBUG: Looking up contract {contract_id} to get client name")
+            
+            # Import here to avoid circular imports
+            from src.database.core.database import get_ai_db
+            from src.database.core.models import Contract, Client
+            from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
+            
+            async with get_ai_db() as session:
+                # Get contract with client information
+                # Convert contract_id to integer to match database column type
+                contract_id_int = int(contract_id)
+                result = await session.execute(
+                    select(Contract)
+                    .options(selectinload(Contract.client))
+                    .filter(Contract.contract_id == contract_id_int)
+                )
+                contract = result.scalar_one_or_none()
+                
+                if contract and contract.client:
+                    client_name = contract.client.client_name
+                    print(f"🔍 DEBUG: Found client name for contract {contract_id}: {client_name}")
+                    
+                    # Save client name in state
+                    if 'data' not in state:
+                        state['data'] = {}
+                    state['data']['current_client'] = client_name
+                    print(f"🔍 DEBUG: Saved client name in context: {client_name}")
+                else:
+                    print(f"🔍 DEBUG: Contract {contract_id} not found or has no client")
+                    
+        except Exception as e:
+            print(f"🔍 DEBUG: Error looking up contract {contract_id}: {e}")
 
 
 # --- Agent Node Definitions ---

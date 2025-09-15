@@ -36,10 +36,24 @@ async def store_chat_session(
         )
     
     try:
+        # Get existing conversation state to preserve it
+        existing_data = await session_manager.get_chat_session(request.session_id, request.user_id)
+        
+        # Merge with existing conversation state if it exists
+        if existing_data and "conversation_state" in existing_data:
+            # Preserve conversation state and merge with new chat data
+            merged_data = {
+                "conversation_state": existing_data["conversation_state"],
+                **request.chat_data  # Override with new chat data
+            }
+        else:
+            # No existing conversation state, use new data as-is
+            merged_data = request.chat_data
+        
         await session_manager.store_chat_session(
             request.session_id,
             request.user_id,
-            request.chat_data
+            merged_data
         )
         return {"message": "Chat session stored successfully"}
     except Exception as e:

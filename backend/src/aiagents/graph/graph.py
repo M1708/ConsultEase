@@ -78,6 +78,9 @@ def after_agent_execution(state: AgentState) -> str:
     # 🚀 PHASE 2 OPTIMIZATION: Enhanced agent execution logic to prevent unnecessary iterations
     # TODO: If agents stop calling tools when needed, revert these optimizations
     
+    print(f"🔍 DEBUG: after_agent_execution - state['data'] = {state.get('data', {})}")
+    print(f"🔍 DEBUG: after_agent_execution - user_operation = {state.get('data', {}).get('user_operation', 'NOT_FOUND')}")
+    
     last_message = state['messages'][-1]
     
     # 🚀 OPTIMIZATION: Check if this is a simple response that doesn't need tools
@@ -115,6 +118,9 @@ def after_agent_execution(state: AgentState) -> str:
 def after_tool_execution(state: AgentState) -> str:
     """Decides whether to continue with the agent or end the conversation."""
     # 🚀 PERFORMANCE OPTIMIZATION: Track execution flow for contract search optimization
+    
+    print(f"🔍 DEBUG: after_tool_execution - state['data'] = {state.get('data', {})}")
+    print(f"🔍 DEBUG: after_tool_execution - user_operation = {state.get('data', {}).get('user_operation', 'NOT_FOUND')}")
     
     # CRITICAL FIX: After tool execution, always return to the current agent
     # so it can process and format the tool results

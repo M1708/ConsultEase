@@ -27,6 +27,10 @@ class UpdateClientParams(BaseModel):
 async def update_client_tool(params: UpdateClientParams, context: Dict[str, Any] = None) -> ClientToolResult:
     """Tool for updating existing client information"""
     try:
+        print(f"🔍 DEBUG: Update CLIENT tool called (this should NOT be called for contract operations)")
+        print(f"🔍 DEBUG: Params: {params}")
+        print(f"🔍 DEBUG: Context: {context}")
+        
         async with get_ai_db() as session:
         
             if not context or 'user_id' not in context:

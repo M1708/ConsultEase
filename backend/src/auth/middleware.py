@@ -24,7 +24,6 @@ async def auth_middleware(request: Request, call_next):
         "/openapi.json",
         "/api/auth/profile/",  # This specific endpoint bypasses normal auth
         "/api/chat/greeting",  # Fast greeting endpoint without auth
-        "/api/chat/message",   # TEMPORARY: Skip auth for testing employee creation
     ]
     
     if any(request.url.path.startswith(path) for path in skip_auth_paths):

@@ -1027,12 +1027,30 @@ async def tool_executor_node(state: AgentState) -> Dict:
             result_content = json.dumps({"error": f"Tool '{tool_name}' not found in registry."})
         else:
             try:
+                # Validate and correct tool selection
+                validated_tool_name = validate_and_correct_tool(tool_name, state)
+                if validated_tool_name != tool_name:
+                    print(f"🔍 DEBUG: Tool corrected from {tool_name} to {validated_tool_name}")
+                    tool_name = validated_tool_name
+                
                 tool_function = TOOL_REGISTRY[tool_name]
                 args = json.loads(tool_call.function.arguments)
                 
                 # Add the database session and context to the arguments for the wrapper
                 #args['db'] = db_session
-                args['context'] = context
+                
+                # Enhance context with extracted context from state['data']
+                enhanced_context = context.copy() if context else {}
+                if 'data' in state and state['data']:
+                    enhanced_context.update(state['data'])
+                
+                print(f"🔍 DEBUG: Tool {tool_name} called with context:")
+                print(f"🔍 DEBUG: Original context: {context}")
+                print(f"🔍 DEBUG: State data: {state.get('data', {})}")
+                print(f"🔍 DEBUG: Enhanced context: {enhanced_context}")
+                print(f"🔍 DEBUG: Tool arguments: {args}")
+                
+                args['context'] = enhanced_context
                 
                 output = await tool_function(**args)
                 
@@ -1049,3 +1067,29 @@ async def tool_executor_node(state: AgentState) -> Dict:
         })
 
     return {"messages": results}
+
+def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
+    """Validate and correct tool selection based on current workflow."""
+    
+    # Define allowed tools for each workflow
+    ALLOWED_TOOLS = {
+        'update': ['update_contract'],
+        'delete': ['delete_contract'],
+        'create': ['create_contract', 'create_client_and_contract'],
+        'upload': ['upload_contract_document'],
+        'show': ['get_contracts_by_client', 'get_client_details']
+    }
+    
+    # Get current workflow from state
+    current_workflow = state.get('data', {}).get('user_operation', '').split('_')[0]  # Extract 'update' from 'update_contract'
+    allowed_tools = ALLOWED_TOOLS.get(current_workflow, [])
+    
+    print(f"🔍 DEBUG: Tool validation - tool: {tool_name}, workflow: {current_workflow}, allowed: {allowed_tools}")
+    
+    # If tool is not in allowed list, correct it
+    if allowed_tools and tool_name not in allowed_tools:
+        corrected_tool = allowed_tools[0]  # Use first allowed tool
+        print(f"🔍 DEBUG: Tool corrected from {tool_name} to {corrected_tool}")
+        return corrected_tool
+    
+    return tool_name

@@ -405,14 +405,41 @@ Contract listing (get_client_contracts) → ONLY when user asks to "list/show co
 - ALWAYS check state['data']['current_client'] when user provides contract ID
 - ALWAYS check state['data']['current_workflow'] when user responds with yes/no
 - ALWAYS check state['data']['current_contract_id'] when user selects contract
+- ALWAYS check state['data']['user_operation'] to understand the original user intent
+- ALWAYS check state['data']['original_user_request'] to see what the user originally asked for
 - If context exists in state['data'] → USE IT, don't ask for clarification
 
 **EXAMPLE:**
-- Previous: "Update contract for InnovateTech Solutions" → state['data']['current_client'] = "InnovateTech Solutions", state['data']['current_workflow'] = "update"
+- Previous: "Update contract for InnovateTech Solutions" → state['data']['current_client'] = "InnovateTech Solutions", state['data']['current_workflow'] = "update", state['data']['user_operation'] = "update_contract", state['data']['original_user_request'] = "Update contract for InnovateTech Solutions"
 - User responds: "123"
-- Agent should: Use InnovateTech Solutions + update operation + contract 123 → Call `update_contract` with client_name="InnovateTech Solutions" and contract_id=123
+- Agent should: Use InnovateTech Solutions + update_contract operation + contract 123 → Call `update_contract_tool` with client_name="InnovateTech Solutions" and contract_id=123
 - Agent should NOT: Ask "what do you want to do with 123?"
-- Agent should NOT: Call `update_client` when contract ID is provided
+- Agent should NOT: Call `update_client_tool` when user_operation = "update_contract"
+
+🚨🚨🚨 CRITICAL: PERSISTENT USER OPERATION 🚨🚨🚨
+- state['data']['user_operation'] contains the SPECIFIC TOOL NAME (update_contract/delete_contract/create_contract/update_client/etc)
+- state['data']['original_user_request'] contains the EXACT original user message
+- These fields ONLY change when user makes a NEW operation request
+- When user responds with just a contract ID, PRESERVE the original operation
+- NEVER lose track of what the user originally wanted to do
+
+**TOOL MAPPING:**
+- "Update contract" → user_operation = "update_contract"
+- "Delete contract" → user_operation = "delete_contract"  
+- "Create contract" → user_operation = "create_contract"
+- "Upload contract document" → user_operation = "upload_contract_document"
+- "Show contracts" → user_operation = "get_contracts_by_client"
+- "Update client" → user_operation = "update_client"
+- "Create client" → user_operation = "create_client"
+- "Show client" → user_operation = "get_client_details"
+
+**CRITICAL: USE PERSISTENT USER OPERATION FOR TOOL SELECTION**
+- When user provides contract ID, check state['data']['user_operation']
+- If user_operation = "update_contract" → Call update_contract_tool
+- If user_operation = "delete_contract" → Call delete_contract_tool
+- If user_operation = "create_contract" → Call create_contract_tool
+- NEVER call update_client_tool when user_operation = "update_contract"
+- NEVER call update_contract_tool when user_operation = "update_client"
 
 🚨 CONTRACT/CLIENT TOOL SELECTION – SYSTEM RULES 🚨
 
@@ -480,6 +507,10 @@ Client details (all clients) → get_all_clients_with_contracts
 🧭 OPERATION RULES
 
 UPDATE
+CRITICAL: Context Retention:
+-Remember client name from previous messages
+-Remember the operation user wanted to perform
+-Use contract_id when provided to complete the original reques
 User specifies what to update + which client:
 - ONE contract → call update_contract directly.
 - MULTIPLE contracts → show contract list + ask which ID.
@@ -499,6 +530,10 @@ CLIENT DELETION CONFIRMATION:
 
 
 DELETE
+CRITICAL: Context Retention:
+-Remember client name from previous messages
+-Remember the operation user wanted to perform
+-Use contract_id when provided to complete the original reques
 If user specifies client:
 If ONE contract → call delete_contract directly.
 If MULTIPLE contracts → show contract list + ask which ID.
@@ -751,6 +786,11 @@ User: “Update client contact information for Sangard” → update_client ✅
 📝 Operations
 OPERATION-SPECIFIC RULES
 ✅ UPDATE CONTRACT RULES
+
+CRITICAL: Context Retention:
+-Remember client name from previous messages
+-Remember the operation user wanted to perform
+-Use contract_id when provided to complete the original reques
 
 1. If user requests "update" (billing date, amount, terms, etc.):
    - If ONE contract exists → directly call update_contract
@@ -1242,6 +1282,13 @@ async def get_dynamic_instructions(
     """
     Convenience function to get dynamic instructions for an agent.
     """
-    return await dynamic_prompt_generator.generate_agent_instructions(
+    print(f"🔍 DEBUG: Generating dynamic instructions for {agent_type}")
+    print(f"🔍 DEBUG: State data: {state.get('data', {})}")
+    
+    instructions = await dynamic_prompt_generator.generate_agent_instructions(
         agent_type, state, execution_context
     )
+    
+    print(f"🔍 DEBUG: Generated instructions length: {len(instructions)} characters")
+    
+    return instructions

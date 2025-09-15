@@ -364,10 +364,27 @@ async def send_chat_message_with_file(
             existing_state = None
             user_id = str(current_user.user_id)
             try:
-                existing_state = await session_manager.get_session(session_id, user_id)
-                print(f"🔄 CHAT API: Found existing state for session {session_id}")
+                print(f"🔍 DEBUG: Attempting to retrieve conversation state for session {session_id}, user {user_id}")
+                existing_state = await session_manager.get_chat_session(session_id, user_id)
+                print(f"🔍 DEBUG: Raw session data retrieved: {existing_state}")
+                print(f"🔍 DEBUG: Type of retrieved data: {type(existing_state)}")
+                
+                if existing_state and "conversation_state" in existing_state:
+                    existing_state = existing_state["conversation_state"]
+                    print(f"🔄 CHAT API: Found existing conversation state for session {session_id}")
+                    print(f"🔍 DEBUG: Conversation state data: {existing_state.get('data', {})}")
+                else:
+                    existing_state = None
+                    print(f"🔄 CHAT API: No existing conversation state found")
+                    print(f"🔍 DEBUG: existing_state is None: {existing_state is None}")
+                    if existing_state:
+                        print(f"🔍 DEBUG: existing_state keys: {list(existing_state.keys()) if isinstance(existing_state, dict) else 'Not a dict'}")
             except Exception as e:
-                print(f"🔄 CHAT API: No existing state found, creating new: {e}")
+                print(f"🔄 CHAT API: Exception during session retrieval: {e}")
+                print(f"🔍 DEBUG: Exception type: {type(e)}")
+                import traceback
+                print(f"🔍 DEBUG: Full traceback: {traceback.format_exc()}")
+                existing_state = None
             
             # Create or update state
             if existing_state:
@@ -467,6 +484,9 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
     """
     Sends a message to the new agentic graph and returns a JSON response.
     """
+    print(f"🔥 CHAT API: ENTRY POINT - Message received: {chat_request.message}")
+    print(f"🔥 CHAT API: Session ID: {chat_request.session_id}")
+    
     #db = next(get_db())
     
     try:
@@ -604,6 +624,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
             print(f"🔍 DEBUG: Session ID: {chat_request.session_id}")
             
             print(f"🔥 CHAT API: Proceeding with LangGraph...")
+            print(f"🔥 CHAT API: Message '{message_content}' did not match any fast paths")
 
             # --- LangGraph Invocation for complex messages ---
             # 1. Load existing conversation context or create new one
@@ -614,14 +635,19 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
             
             # Try to load existing conversation state
             existing_state = None
+            print(f"🔥 CHAT API: About to retrieve session data for session_id={session_id}, user_id={user_id}")
             try:
                 chat_session_data = await session_manager.get_chat_session(
                     session_id, 
                     user_id
                 )
+                print(f"🔍 DEBUG: Raw chat session data: {chat_session_data}")
                 if chat_session_data and "conversation_state" in chat_session_data:
                     existing_state = chat_session_data["conversation_state"]
                     print(f"🔄 CHAT API: Loaded existing conversation state with {len(existing_state.get('messages', []))} messages")
+                    print(f"🔍 DEBUG: Existing state data: {existing_state.get('data', {})}")
+                else:
+                    print(f"🔍 DEBUG: No conversation_state in chat_session_data")
             except Exception as e:
                 print(f"🔄 CHAT API: No existing state found, creating new: {e}")
             
@@ -687,12 +713,17 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 # Convert ChatCompletionMessage objects to serializable format
                 serializable_result = _make_serializable(result)
                 
-                # Save conversation state to session
+                print(f"🔍 DEBUG: Saving conversation state with data: {serializable_result.get('data', {})}")
+                print(f"🔍 DEBUG: Session ID: {session_id}, User ID: {current_user.user_id}")
+                print(f"🔍 DEBUG: Full serializable_result keys: {list(serializable_result.keys())}")
+                
+                # Save conversation state to session using the same session_id as retrieval
                 await session_manager.store_chat_session(
-                    current_user.session_id,
+                    session_id,  # Use the same session_id as retrieval
                     str(current_user.user_id),
                     {"conversation_state": serializable_result}
                 )
+                print(f"🔍 DEBUG: Conversation state saved successfully")
                 print(f"🔄 CHAT API: Saved conversation state with {len(serializable_result.get('messages', []))} messages")
             except Exception as save_error:
                 print(f"⚠️ CHAT API: Failed to save conversation state: {save_error}")

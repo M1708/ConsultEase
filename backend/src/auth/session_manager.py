@@ -190,24 +190,53 @@ class SessionManager:
     
     async def store_chat_session(self, session_id: str, user_id: str, chat_data: Dict[str, Any]):
         """Store chat session data"""
+        print(f"🔍 DEBUG: store_chat_session called with session_id={session_id}, user_id={user_id}")
+        print(f"🔍 DEBUG: Redis available: {self.redis_available}, Redis client: {self.redis_client is not None}")
+        print(f"🔍 DEBUG: Chat data to store: {chat_data}")
+        
         if not self.redis_client:
             # Mock implementation
             chat_key = f"chat:{session_id}:user:{user_id}"
+            print(f"🔍 DEBUG: Using mock implementation, chat_key: {chat_key}")
             self._mock_chats[chat_key] = chat_data
+            print(f"🔍 DEBUG: Mock storage complete")
             return
         
         # Redis implementation
         chat_key = f"chat:{session_id}:user:{user_id}"
-        self.redis_client.setex(chat_key, self.session_ttl, json.dumps(chat_data))
+        print(f"🔍 DEBUG: Redis implementation, chat_key: {chat_key}")
+        try:
+            self.redis_client.setex(chat_key, self.session_ttl, json.dumps(chat_data))
+            print(f"🔍 DEBUG: Redis storage complete")
+        except Exception as e:
+            print(f"🔍 DEBUG: Redis error in store_chat_session: {e}")
     
     async def get_chat_session(self, session_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Get chat session data"""
+        print(f"🔍 DEBUG: get_chat_session called with session_id={session_id}, user_id={user_id}")
+        print(f"🔍 DEBUG: Redis available: {self.redis_available}, Redis client: {self.redis_client is not None}")
+        
         if not self.redis_client:
             # Mock implementation
             chat_key = f"chat:{session_id}:user:{user_id}"
-            return self._mock_chats.get(chat_key)
+            print(f"🔍 DEBUG: Using mock implementation, chat_key: {chat_key}")
+            result = self._mock_chats.get(chat_key)
+            print(f"🔍 DEBUG: Mock result: {result}")
+            return result
         
         # Redis implementation
         chat_key = f"chat:{session_id}:user:{user_id}"
-        chat_data = self.redis_client.get(chat_key)
-        return json.loads(chat_data) if chat_data else None
+        print(f"🔍 DEBUG: Redis implementation, chat_key: {chat_key}")
+        try:
+            chat_data = self.redis_client.get(chat_key)
+            print(f"🔍 DEBUG: Raw Redis data: {chat_data}")
+            if chat_data:
+                data = json.loads(chat_data)
+                print(f"🔍 DEBUG: Parsed Redis data: {data}")
+                return data
+            else:
+                print(f"🔍 DEBUG: No data found in Redis for key: {chat_key}")
+                return None
+        except Exception as e:
+            print(f"🔍 DEBUG: Redis error in get_chat_session: {e}")
+            return None
