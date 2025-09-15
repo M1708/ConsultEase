@@ -56,7 +56,7 @@ class UploadContractDocumentParams(BaseModel):
     mime_type: str
 
 class UpdateContractParams(BaseModel):
-    client_name: str
+    client_name: str 
     contract_id: Optional[int] = None
     user_response: Optional[str] = None  # User's response to contract selection prompt
     update_all: Optional[bool] = False  # Whether to update all contracts for the client
@@ -69,9 +69,87 @@ class UpdateContractParams(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
 
+async def update_specific_contract(contract: Contract, params: UpdateContractParams, session) -> ContractToolResult:
+    """Update a specific contract with the provided parameters"""
+    try:
+        print(f"🔍 DEBUG: update_specific_contract called for contract {contract.contract_id}")
+        print(f"🔍 DEBUG: Update params: {params}")
+        
+        updated_fields = []
+        
+        # Update contract fields if provided
+        if params.start_date:
+            contract.start_date = datetime.strptime(params.start_date, "%Y-%m-%d").date()
+            updated_fields.append("start_date")
+        if params.end_date:
+            contract.end_date = datetime.strptime(params.end_date, "%Y-%m-%d").date()
+            updated_fields.append("end_date")
+        if params.contract_type:
+            contract.contract_type = params.contract_type
+            updated_fields.append("contract_type")
+        if params.original_amount is not None:
+            contract.original_amount = params.original_amount
+            contract.current_amount = params.original_amount  # Update current amount too
+            updated_fields.append("original_amount")
+        if params.billing_frequency:
+            contract.billing_frequency = params.billing_frequency
+            updated_fields.append("billing_frequency")
+        if params.billing_prompt_next_date:
+            contract.billing_prompt_next_date = datetime.strptime(params.billing_prompt_next_date, "%Y-%m-%d").date()
+            updated_fields.append("billing_prompt_next_date")
+        if params.status:
+            contract.status = params.status
+            updated_fields.append("status")
+        if params.notes is not None:
+            contract.notes = params.notes
+            updated_fields.append("notes")
+        
+        print(f"🔍 DEBUG: Updated fields: {updated_fields}")
+        
+        # Update the updated_at timestamp
+        contract.updated_at = datetime.utcnow()
+        
+        await session.commit()
+        
+        message = f"✅ Successfully updated contract {contract.contract_id} for {contract.client.client_name}"
+        if updated_fields:
+            message += f". Updated fields: {', '.join(updated_fields)}"
+        
+        print(f"🔍 DEBUG: Returning message: {message}")
+        
+        return ContractToolResult(
+            success=True,
+            message=message,
+            data={
+                "contract": {
+                    "contract_id": contract.contract_id,
+                    "client_name": contract.client.client_name,
+                    "contract_type": contract.contract_type,
+                    "status": contract.status,
+                    "original_amount": contract.original_amount,
+                    "current_amount": contract.current_amount,
+                    "start_date": contract.start_date.isoformat() if contract.start_date else None,
+                    "end_date": contract.end_date.isoformat() if contract.end_date else None,
+                    "billing_frequency": contract.billing_frequency,
+                    "billing_prompt_next_date": contract.billing_prompt_next_date.isoformat() if contract.billing_prompt_next_date else None,
+                    "notes": contract.notes
+                }
+            }
+        )
+    except Exception as e:
+        await session.rollback()
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Error updating contract: {str(e)}"
+        )
+
 async def update_contract_tool(params: UpdateContractParams, context: Dict[str, Any] = None) -> ContractToolResult:
     """Tool for updating existing contracts by client name"""
     try:
+        print(f"🔍 DEBUG: Update contract tool called")
+        print(f"🔍 DEBUG: Params: {params}")
+        print(f"🔍 DEBUG: Context: {context}")
+        
         async with get_ai_db() as session:
             if not context or 'user_id' not in context:
                 return ContractToolResult(
@@ -81,6 +159,36 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
             
             user_id = context['user_id']
             
+            # If we have a specific contract_id, update that contract directly
+            if params.contract_id:
+                print(f"🔍 DEBUG: Using contract_id path for contract {params.contract_id}")
+                contract_result = await session.execute(select(Contract).options(
+                    selectinload(Contract.client)
+                ).filter(Contract.contract_id == params.contract_id))
+                
+                contract = contract_result.scalar_one_or_none()
+                if not contract:
+                    print(f"🔍 DEBUG: Contract {params.contract_id} not found")
+                    return ContractToolResult(
+                        success=False,
+                        message=f"❌ Contract with ID {params.contract_id} not found."
+                    )
+                
+                print(f"🔍 DEBUG: Found contract {contract.contract_id}, calling update_specific_contract")
+                # Update the specific contract
+                result = await update_specific_contract(contract, params, session)
+                print(f"🔍 DEBUG: update_specific_contract returned: {result.message}")
+                return result
+            
+            # If no contract_id provided, we need client_name to find contracts
+            if not params.client_name:
+                print(f"🔍 DEBUG: No contract_id and no client_name provided")
+                return ContractToolResult(
+                    success=False,
+                    message="❌ Either contract_id or client_name must be provided."
+                )
+            
+            print(f"🔍 DEBUG: Using client_name path for client {params.client_name}")
             
             client = await get_client_by_name(params.client_name, session)
             if not client:
@@ -1443,9 +1551,15 @@ async def delete_contract_tool(params: DeleteContractParams, context: Optional[D
                 requested_id = None
                 
                 # Use stored client context if available
+                print(f"🔍 DEBUG: Delete contract - Context received: {context}")
+                print(f"🔍 DEBUG: Delete contract - Params client_name: {params.client_name}")
+                print(f"🔍 DEBUG: Delete contract - User response: {params.user_response}")
+                
                 if context and 'current_client' in context and not params.client_name:
                     params.client_name = context['current_client']
                     print(f"🔍 DEBUG: Using stored client context for deletion: {context['current_client']}")
+                else:
+                    print(f"🔍 DEBUG: No stored client context available or client_name already set")
                 
                 # Handle various formats: "106", "contract 106", "contract id 106", "id 106"
                 if user_input.isdigit():
