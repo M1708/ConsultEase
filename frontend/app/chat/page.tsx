@@ -597,6 +597,7 @@ export default function ChatPage() {
                               text={msg.response}
                               className="text-gray-900 text-sm"
                               style={{ fontFamily: "Arial, sans-serif" }}
+                              enableMarkdown={true}
                             />
                             <div
                               className="text-xs text-gray-500 mt-1"

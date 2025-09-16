@@ -16,6 +16,11 @@ interface TypewriterTextProps {
 
 // Function to preprocess URLs for typewriter display (shows only shortened text)
 const preprocessUrlsForTypewriter = (text: string): string => {
+  // Don't process text that already contains markdown links to avoid flickering
+  if (text.includes('[') && text.includes('](')) {
+    return text;
+  }
+  
   const urlRegex = /(https?:\/\/[^\s\)\]\}]+\/?)/g;
   
   return text.replace(urlRegex, (url) => {
@@ -26,6 +31,11 @@ const preprocessUrlsForTypewriter = (text: string): string => {
 
 // Function to preprocess URLs for final Markdown rendering
 const preprocessUrlsForMarkdown = (text: string): string => {
+  // Don't process text that already contains markdown links
+  if (text.includes('[') && text.includes('](')) {
+    return text;
+  }
+  
   const urlRegex = /(https?:\/\/[^\s\)\]\}]+\/?)/g;
   
   return text.replace(urlRegex, (url) => {
@@ -43,17 +53,39 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
   style,
   enableMarkdown = true // Default to true for Markdown support
 }) => {
+  // Debug logging for markdown processing
+  if (enableMarkdown) {
+    console.log("🔗 FRONTEND DEBUG: TypewriterText received text:", text);
+    console.log("🔗 FRONTEND DEBUG: Text length:", text.length);
+    console.log("🔗 FRONTEND DEBUG: Contains markdown link:", text.includes('[') && text.includes(']('));
+    if (text.includes('[') && text.includes('](')) {
+      const linkMatch = text.match(/\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) {
+        console.log("🔗 FRONTEND DEBUG: Found markdown link:", linkMatch[0]);
+        console.log("🔗 FRONTEND DEBUG: Link text:", linkMatch[1]);
+        console.log("🔗 FRONTEND DEBUG: Link URL:", linkMatch[2]);
+        console.log("🔗 FRONTEND DEBUG: URL starts with:", linkMatch[2].substring(0, 50));
+      }
+    }
+  }
+
   const [displayedText, setDisplayedText] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   
   // Preprocess URLs for typewriter effect (shows shortened text only)
   const typewriterText = useMemo(() => {
-    return enableMarkdown ? preprocessUrlsForTypewriter(text) : text;
+    return enableMarkdown ? text : preprocessUrlsForTypewriter(text);
   }, [text, enableMarkdown]);
   
   // Preprocess URLs for final Markdown rendering
   const markdownText = useMemo(() => {
-    return enableMarkdown ? preprocessUrlsForMarkdown(text) : text;
+    if (enableMarkdown) {
+      const processed = preprocessUrlsForMarkdown(text);
+      console.log("🔗 FRONTEND DEBUG: Original text:", text);
+      console.log("🔗 FRONTEND DEBUG: Processed markdown text:", processed);
+      return processed;
+    }
+    return text;
   }, [text, enableMarkdown]);
   
   useEffect(() => {
@@ -93,18 +125,34 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
             rehypePlugins={[rehypeHighlight]}
             components={{
               // Custom link component to ensure proper URL handling
-              a: ({ href, children, ...props }) => (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-800 underline break-all"
-                  style={{ margin: 0, padding: 0, lineHeight: '1.2' }}
-                  {...props}
-                >
-                  {children}
-                </a>
-              ),
+              a: ({ href, children, ...props }) => {
+                console.log("🔗 FRONTEND DEBUG: Rendering link with href:", href);
+                console.log("🔗 FRONTEND DEBUG: Link children:", children);
+                console.log("🔗 FRONTEND DEBUG: Link props:", props);
+                console.log("🔗 FRONTEND DEBUG: href type:", typeof href);
+                console.log("🔗 FRONTEND DEBUG: href length:", href?.length);
+                
+                // Ensure href is absolute URL
+                const absoluteHref = href?.startsWith('http') ? href : `https://${href}`;
+                console.log("🔗 FRONTEND DEBUG: Absolute href:", absoluteHref);
+                
+                return (
+                  <a
+                    href={absoluteHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline break-all"
+                    style={{ margin: 0, padding: 0, lineHeight: '1.2' }}
+                    onClick={(e) => {
+                      console.log("🔗 FRONTEND DEBUG: Link clicked, href:", absoluteHref);
+                      console.log("🔗 FRONTEND DEBUG: Event target:", e.target);
+                    }}
+                    {...props}
+                  >
+                    {children}
+                  </a>
+                );
+              },
               // Custom code component for better styling
               code: ({ className, children, ...props }) => {
                 const match = /language-(\w+)/.exec(className || '');

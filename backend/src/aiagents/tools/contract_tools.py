@@ -456,7 +456,6 @@ async def smart_contract_document_tool(params: ContractDocumentParams) -> Contra
 
 async def upload_contract_document_tool(params: UploadContractDocumentParams, context: Optional[Dict[str, Any]] = None) -> ContractToolResult:
     """Upload contract document for a client's contract"""
-    print(f"🔍 UPLOAD TOOL: Called for client '{params.client_name}', contract_id: {params.contract_id}")
     try:
         async with get_ai_db() as session:
             # Find contract (same logic as smart_contract_document_tool)
@@ -490,7 +489,6 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                     Contract.client_id == client.client_id
                 ).order_by(Contract.created_at.desc()))
                 contracts = contracts_result.scalars().all()
-                print(f"🔍 UPLOAD TOOL: Found {len(contracts)} contracts for client '{client.client_name}'")
                 
                 # Initialize contract variable
                 contract = None
@@ -529,10 +527,8 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                     if last_created_contract:
                         # Use the recently created contract from session context
                         contract = last_created_contract
-                        print(f"🔍 UPLOAD TOOL: Using recently created contract: {contract.contract_id}")
                     else:
                         # Ask for clarification - show all contracts for the client
-                        print(f"🔍 UPLOAD TOOL: Multiple contracts found, asking for clarification")
                         contract_list = []
                         for i, c in enumerate(contracts, 1):
                             amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
@@ -543,10 +539,6 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                         # Create the response
                         response_message = f"📋 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to upload the document for (e.g., \"upload document for {client.client_name} contract {contracts[0].contract_id}\")."
                         
-                        print(f"🔍 UPLOAD TOOL: Returning response with {len(contract_list)} contracts")
-                        print(f"🔍 UPLOAD TOOL: Response message length: {len(response_message)} characters")
-                        print(f"🔍 UPLOAD TOOL: Response message preview: {response_message[:100]}...")
-                        
                         return ContractToolResult(
                             success=False,
                             message=response_message
@@ -556,7 +548,6 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
         if contract or len(contracts) == 1:
             if not contract:
                 contract = contracts[0]
-            print(f"🔍 UPLOAD TOOL: Using contract: {contract.contract_id}")
             
             # Upload document using storage service
             storage_service = SupabaseStorageService()
@@ -605,13 +596,10 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                 )
             
             # Perform upload
-            print(f"🧾 UPLOAD: Start - contract_id={contract.contract_id}, filename='{params.filename}', size_hint={params.file_size}, mime='{params.mime_type}'")
             upload_result = await storage_service.upload_contract_document(file_obj, contract.contract_id)
-            print(f"🧾 UPLOAD: Result keys={list(upload_result.keys())}, file_path={upload_result.get('file_path')}, size={upload_result.get('file_size')}")
             
             if upload_result.get("success"):
                 # Update contract record
-                print("🧾 UPLOAD: Updating contract record with storage values")
                 contract.document_filename = upload_result.get("filename")
                 contract.document_file_path = upload_result.get("file_path")
                 contract.document_bucket_name = "contract-documents"
@@ -622,7 +610,6 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                 # Persist changes
                 session.add(contract)
                 await session.commit()
-                print(f"🧾 UPLOAD: Persisted - filename={contract.document_filename}, path={contract.document_file_path}, size={contract.document_file_size}, mime={contract.document_mime_type}, uploaded_at={contract.document_uploaded_at}")
                 
                 # Format file size for display
                 file_size_mb = contract.document_file_size / (1024 * 1024) if contract.document_file_size else 0
@@ -630,11 +617,16 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                 
                 # Create download URL - use signed URL from storage service
                 file_path = upload_result.get("file_path")
+                print(f"🔗 URL DEBUG: File path from upload result: {file_path}")
+                
                 if file_path:
                     download_url = storage_service.get_contract_document_url(file_path)
+                    print(f"🔗 URL DEBUG: Generated signed URL: {download_url}")
+                    print(f"🔗 URL DEBUG: URL length: {len(download_url)} characters")
+                    print(f"🔗 URL DEBUG: URL starts with: {download_url[:50]}...")
                 else:
                     download_url = f"/contracts/{contract.contract_id}/document"
-                print(f"🧾 UPLOAD: Download URL generated = {download_url}")
+                    print(f"🔗 URL DEBUG: Using fallback URL: {download_url}")
                 
                 # Check if this was auto-selected from session context
                 context_note = ""
@@ -642,9 +634,18 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                     context['last_created_contract'].get('contract_id') == contract.contract_id):
                     context_note = "\n\n💡 *Document uploaded to the recently created contract*"
                 
+                # Create the final message
+                final_message = f"✅ Contract document uploaded successfully for **{contract.client.client_name}**\n\n📄 **Document Details:**\n- **Filename:** [{contract.document_filename}]({download_url})\n- **File Size:** {file_size_display}\n- **Contract ID:** {contract.contract_id}\n- **Uploaded At:** {contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else 'N/A'}{context_note}"
+                
+                print(f"🔗 URL DEBUG: Final message being sent to frontend:")
+                print(f"🔗 URL DEBUG: Message length: {len(final_message)} characters")
+                print(f"🔗 URL DEBUG: Contains markdown link: {'[' in final_message and '](' in final_message}")
+                print(f"🔗 URL DEBUG: Markdown format: [{contract.document_filename}]({download_url})")
+                print(f"🔗 URL DEBUG: Message preview: {final_message[:200]}...")
+                
                 return ContractToolResult(
                     success=True,
-                    message=f"✅ Contract document uploaded successfully for **{contract.client.client_name}**\n\n📄 **Document Details:**\n- **Filename:** <a href=\"{download_url}\" target=\"_blank\">{contract.document_filename}</a>\n- **File Size:** {file_size_display}\n- **Contract ID:** {contract.contract_id}\n- **Uploaded At:** {contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else 'N/A'}{context_note}",
+                    message=final_message,
                     data={
                         "contract_id": contract.contract_id,
                         "client_name": contract.client.client_name,
@@ -1561,15 +1562,8 @@ async def delete_contract_tool(params: DeleteContractParams, context: Optional[D
                 requested_id = None
                 
                 # Use stored client context if available
-                print(f"🔍 DEBUG: Delete contract - Context received: {context}")
-                print(f"🔍 DEBUG: Delete contract - Params client_name: {params.client_name}")
-                print(f"🔍 DEBUG: Delete contract - User response: {params.user_response}")
-                
                 if context and 'current_client' in context and not params.client_name:
                     params.client_name = context['current_client']
-                    print(f"🔍 DEBUG: Using stored client context for deletion: {context['current_client']}")
-                else:
-                    print(f"🔍 DEBUG: No stored client context available or client_name already set")
                 
                 # Handle various formats: "106", "contract 106", "contract id 106", "id 106"
                 if user_input.isdigit():

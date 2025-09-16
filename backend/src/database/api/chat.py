@@ -1017,8 +1017,26 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                     response_content = last_message.content
                     print(f"🔍 DEBUG: Extracted content from LangChain message: {response_content[:100]}...")
                 elif isinstance(last_message, dict) and 'content' in last_message:
-                    response_content = last_message['content']
-                    print(f"🔍 CHAT API: Extracted content from dict message: {response_content[:100]}...")
+                    # Check if this is a tool result message
+                    if last_message.get('role') == 'tool' and last_message.get('name'):
+                        print(f"🔍 CHAT API: Tool result message detected - name: {last_message.get('name')}")
+                        try:
+                            # Parse the JSON content from tool result
+                            import json
+                            tool_result = json.loads(last_message['content'])
+                            if isinstance(tool_result, dict) and 'message' in tool_result:
+                                response_content = tool_result['message']
+                                print(f"🔍 CHAT API: Extracted message from tool result: {response_content[:100]}...")
+                            else:
+                                response_content = last_message['content']
+                                print(f"🔍 CHAT API: Tool result is not dict or no message field, using raw content: {response_content[:100]}...")
+                        except (json.JSONDecodeError, TypeError) as e:
+                            response_content = last_message['content']
+                            print(f"🔍 CHAT API: Failed to parse tool result JSON, using raw content: {response_content[:100]}...")
+                    else:
+                        response_content = last_message['content']
+                        print(f"🔍 CHAT API: Extracted content from dict message: {response_content[:100]}...")
+                    
                     print(f"🔍 CHAT API: Dict message keys: {list(last_message.keys())}")
                     if 'data' in last_message:
                         print(f"🔍 CHAT API: Message has data field with keys: {list(last_message['data'].keys()) if isinstance(last_message['data'], dict) else 'Not a dict'}")
