@@ -471,6 +471,9 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                         success=False,
                         message=f"❌ Contract with ID {params.contract_id} not found."
                     )
+                # Define variables needed later in the code
+                client = contract.client
+                contracts = [contract]
             else:
                 # Find by client name
                 client = await get_client_by_name(params.client_name, session)
@@ -488,6 +491,9 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                 ).order_by(Contract.created_at.desc()))
                 contracts = contracts_result.scalars().all()
                 print(f"🔍 UPLOAD TOOL: Found {len(contracts)} contracts for client '{client.client_name}'")
+                
+                # Initialize contract variable
+                contract = None
 
                 if not contracts:
                     return ContractToolResult(
@@ -534,25 +540,25 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                             start_date = str(c.start_date) if c.start_date else "Not set"
                             contract_list.append(f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})")
 
-            # Create the response
-            response_message = f"📋 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to upload the document for (e.g., \"upload document for {client.client_name} contract {contracts[0].contract_id}\")."
-            
-            print(f"🔍 UPLOAD TOOL: Returning response with {len(contract_list)} contracts")
-            print(f"🔍 UPLOAD TOOL: Response message length: {len(response_message)} characters")
-            print(f"🔍 UPLOAD TOOL: Response message preview: {response_message[:100]}...")
-            
-            return ContractToolResult(
-                success=True,
-                message=response_message
-            )
+                        # Create the response
+                        response_message = f"📋 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to upload the document for (e.g., \"upload document for {client.client_name} contract {contracts[0].contract_id}\")."
+                        
+                        print(f"🔍 UPLOAD TOOL: Returning response with {len(contract_list)} contracts")
+                        print(f"🔍 UPLOAD TOOL: Response message length: {len(response_message)} characters")
+                        print(f"🔍 UPLOAD TOOL: Response message preview: {response_message[:100]}...")
+                        
+                        return ContractToolResult(
+                            success=False,
+                            message=response_message
+                        )
 
-        # If only one contract, use it directly
-        if len(contracts) == 1:
-            contract = contracts[0]
-            print(f"🔍 UPLOAD TOOL: Using single contract: {contract.contract_id}")
+        # If we have a specific contract (from contract_id) or only one contract from client search
+        if contract or len(contracts) == 1:
+            if not contract:
+                contract = contracts[0]
+            print(f"🔍 UPLOAD TOOL: Using contract: {contract.contract_id}")
             
             # Upload document using storage service
-            
             storage_service = SupabaseStorageService()
             
             # Convert base64 to file-like object
@@ -598,18 +604,25 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                     message=f"❌ Failed to decode file data: {str(e)}. Please ensure the file was properly uploaded and encoded."
                 )
             
+            # Perform upload
+            print(f"🧾 UPLOAD: Start - contract_id={contract.contract_id}, filename='{params.filename}', size_hint={params.file_size}, mime='{params.mime_type}'")
             upload_result = await storage_service.upload_contract_document(file_obj, contract.contract_id)
+            print(f"🧾 UPLOAD: Result keys={list(upload_result.keys())}, file_path={upload_result.get('file_path')}, size={upload_result.get('file_size')}")
             
             if upload_result.get("success"):
                 # Update contract record
+                print("🧾 UPLOAD: Updating contract record with storage values")
                 contract.document_filename = upload_result.get("filename")
                 contract.document_file_path = upload_result.get("file_path")
                 contract.document_bucket_name = "contract-documents"
                 contract.document_file_size = upload_result.get("file_size")
                 contract.document_mime_type = upload_result.get("mime_type")
                 contract.document_uploaded_at = upload_result.get("uploaded_at")
-                
+
+                # Persist changes
+                session.add(contract)
                 await session.commit()
+                print(f"🧾 UPLOAD: Persisted - filename={contract.document_filename}, path={contract.document_file_path}, size={contract.document_file_size}, mime={contract.document_mime_type}, uploaded_at={contract.document_uploaded_at}")
                 
                 # Format file size for display
                 file_size_mb = contract.document_file_size / (1024 * 1024) if contract.document_file_size else 0
@@ -621,6 +634,7 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                     download_url = storage_service.get_contract_document_url(file_path)
                 else:
                     download_url = f"/contracts/{contract.contract_id}/document"
+                print(f"🧾 UPLOAD: Download URL generated = {download_url}")
                 
                 # Check if this was auto-selected from session context
                 context_note = ""

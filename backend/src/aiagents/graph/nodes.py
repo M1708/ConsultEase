@@ -730,16 +730,17 @@ class EnhancedAgentNodeExecutor:
         print(f"🔍 DEBUG: Short-circuit check - user_operation: {has_user_operation} ({user_operation}), client: {has_client}, contract_id: {has_contract_id}, file_info: {has_file_info}")
         print(f"🔍 DEBUG: Full state data: {data}")
 
-        # Short-circuit for file uploads when file_info exists
-        if (has_user_operation and has_client and has_file_info and
+        # Short-circuit for file uploads when file_info exists AND no contract_id is specified yet
+        # This prevents short-circuiting during contract selection responses
+        if (has_user_operation and has_client and has_file_info and not has_contract_id and
             user_operation == 'upload_contract_document'):
-            print(f"🔍 DEBUG: Short-circuiting for file upload - calling upload_contract_document directly")
+            print(f"🔍 DEBUG: Short-circuiting for initial file upload - calling upload_contract_document directly")
             return True
 
         # Only short-circuit for simple cases: contract ID responses after a clear operation request
         # This allows the LLM to handle complex field extraction and natural language variations
         if (has_user_operation and has_client and has_contract_id and
-            user_operation in ['update_contract', 'delete_contract']):
+            user_operation in ['update_contract', 'delete_contract', 'upload_contract_document']):
 
             # Check if this is a simple contract ID response (just a number)
             messages = state.get('messages', [])
