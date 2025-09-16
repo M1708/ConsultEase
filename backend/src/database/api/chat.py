@@ -14,7 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 # --- New Imports for LangGraph Integration ---
-from src.aiagents.graph.graph import app as agent_app
+from src.aiagents.graph.hybrid_workflow import app as agent_app
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 from src.aiagents.graph.state import create_initial_state
@@ -35,35 +35,188 @@ router = APIRouter()
 # TODO: If employee queries become too slow, consider re-implementing this function
 # All employee queries now go through the regular agent graph like clients and contracts
 
-def _make_serializable(obj):
-    """Convert OpenAI objects to JSON-serializable format"""
+def _normalize_message_roles(messages):
+    """Normalize message roles to OpenAI-compatible format"""
+    if not messages:
+        return messages
+
+    normalized_messages = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            # Create a copy to avoid modifying the original
+            normalized_msg = msg.copy()
+
+            # Normalize role from 'human' to 'user'
+            if normalized_msg.get('role') == 'human':
+                normalized_msg['role'] = 'user'
+                print(f"🔧 Normalized message role from 'human' to 'user' for message: {normalized_msg.get('content', '')[:50]}...")
+
+            # Also normalize type if it exists
+            if normalized_msg.get('type') == 'human':
+                normalized_msg['type'] = 'user'
+
+            normalized_messages.append(normalized_msg)
+        else:
+            normalized_messages.append(msg)
+
+    return normalized_messages
+
+def _make_serializable(obj, max_depth=10, current_depth=0):
+    """Convert OpenAI objects to JSON-serializable format with depth protection"""
+    if current_depth >= max_depth:
+        return str(obj)  # Prevent infinite recursion
+
     if hasattr(obj, 'model_dump'):
         # Pydantic models
-        return obj.model_dump()
+        try:
+            return obj.model_dump()
+        except Exception:
+            return str(obj)
     elif hasattr(obj, '__dict__'):
         # OpenAI ChatCompletionMessage objects
         if hasattr(obj, 'content') and hasattr(obj, 'role'):
-            return {
+            result = {
                 'role': obj.role,
                 'content': obj.content,
-                'tool_calls': getattr(obj, 'tool_calls', None)
+                'type': getattr(obj, 'type', 'assistant')
             }
+            # Handle tool_calls safely
+            if hasattr(obj, 'tool_calls') and obj.tool_calls:
+                try:
+                    result['tool_calls'] = _make_serializable(obj.tool_calls, max_depth, current_depth + 1)
+                except Exception:
+                    result['tool_calls'] = []
+            return result
         else:
             # Generic object with __dict__
             result = {}
             for key, value in obj.__dict__.items():
                 if not key.startswith('_'):  # Skip private attributes
-                    result[key] = _make_serializable(value)
+                    try:
+                        result[key] = _make_serializable(value, max_depth, current_depth + 1)
+                    except Exception:
+                        result[key] = str(value)
             return result
     elif isinstance(obj, dict):
-        return {key: _make_serializable(value) for key, value in obj.items()}
+        result = {}
+        for key, value in obj.items():
+            try:
+                # Ensure key is hashable
+                if isinstance(key, (str, int, float, bool, type(None))):
+                    result[key] = _make_serializable(value, max_depth, current_depth + 1)
+                else:
+                    result[str(key)] = _make_serializable(value, max_depth, current_depth + 1)
+            except Exception:
+                result[str(key)] = str(value)
+        return result
     elif isinstance(obj, (list, tuple)):
-        return [_make_serializable(item) for item in obj]
+        result = []
+        for item in obj:
+            try:
+                result.append(_make_serializable(item, max_depth, current_depth + 1))
+            except Exception:
+                result.append(str(item))
+        return result
     elif isinstance(obj, (str, int, float, bool, type(None))):
         return obj
     else:
-        # Fallback to string representation
-        return str(obj)
+        # Fallback to string representation for any other type
+        try:
+            return str(obj)
+        except Exception:
+            return "<unserializable_object>"
+
+def _make_serializable_state(state):
+    """Ensure all values in the state are hashable and serializable"""
+    if not isinstance(state, dict):
+        return state
+
+    serializable_state = {}
+    for key, value in state.items():
+        try:
+            # Ensure key is hashable
+            if isinstance(key, (str, int, float, bool, type(None))):
+                hashable_key = key
+            else:
+                hashable_key = str(key)
+
+            # Make value serializable and ensure no unhashable types
+            serializable_value = _make_serializable(value)
+
+            # Additional check: ensure no nested dictionaries are used as keys
+            if isinstance(serializable_value, dict):
+                serializable_value = _ensure_no_dict_keys(serializable_value)
+
+            serializable_state[hashable_key] = serializable_value
+        except Exception as e:
+            print(f"Warning: Could not serialize state key '{key}': {e}")
+            # Use string representation as fallback
+            serializable_state[str(key)] = str(value)
+
+    return serializable_state
+
+def _ensure_no_dict_keys(obj, max_depth=5, current_depth=0):
+    """Recursively ensure no dictionaries are used as keys anywhere in the object"""
+    if current_depth >= max_depth:
+        return str(obj) if not isinstance(obj, (str, int, float, bool, type(None))) else obj
+
+    if isinstance(obj, dict):
+        result = {}
+        for key, value in obj.items():
+            # Convert any non-hashable key to string
+            if isinstance(key, dict):
+                hashable_key = str(key)
+            elif isinstance(key, (list, tuple)):
+                hashable_key = str(key)
+            elif isinstance(key, (str, int, float, bool, type(None))):
+                hashable_key = key
+            else:
+                hashable_key = str(key)
+
+            # Recursively process the value
+            result[hashable_key] = _ensure_no_dict_keys(value, max_depth, current_depth + 1)
+        return result
+    elif isinstance(obj, (list, tuple)):
+        return [_ensure_no_dict_keys(item, max_depth, current_depth + 1) for item in obj]
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        # For any other object, try to make it serializable
+        try:
+            return _make_serializable(obj)
+        except:
+            return str(obj)
+
+def _validate_state_hashable(state, path="root", max_depth=10, current_depth=0):
+    """Recursively validate that all values in the state are hashable"""
+    if current_depth >= max_depth:
+        return  # Prevent infinite recursion
+
+    if isinstance(state, dict):
+        for key, value in state.items():
+            # Check if key is hashable
+            try:
+                hash(key)
+            except TypeError as e:
+                raise TypeError(f"Unhashable key at {path}.{key}: {type(key).__name__} - {e}")
+
+            # Recursively validate the value
+            _validate_state_hashable(value, f"{path}.{key}", max_depth, current_depth + 1)
+
+    elif isinstance(state, (list, tuple)):
+        for i, item in enumerate(state):
+            _validate_state_hashable(item, f"{path}[{i}]", max_depth, current_depth + 1)
+
+    elif isinstance(state, (str, int, float, bool, type(None))):
+        # These are hashable
+        pass
+
+    else:
+        # For other objects, try to hash them
+        try:
+            hash(state)
+        except TypeError as e:
+            raise TypeError(f"Unhashable value at {path}: {type(state).__name__} - {e}")
 
 class ChatMessage(BaseModel):
     message: str
@@ -293,8 +446,11 @@ async def send_chat_message_with_file(
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         
         # Use a separate database session for authentication
+        print(f"🔍 DEBUG: Starting authentication process")
         async with get_ai_db() as auth_db:
+            print(f"🔍 DEBUG: Got auth database session")
             current_user = await get_current_user(credentials, auth_db)
+            print(f"🔍 DEBUG: Authentication successful for user: {current_user.user_id}")
         
         # Now use the main database session for the rest of the function
         async with get_ai_db() as db:
@@ -388,8 +544,12 @@ async def send_chat_message_with_file(
             
             # Create or update state
             if existing_state:
-                # Add new message to existing conversation
-                new_message = HumanMessage(content=message_content)
+                # Add new message to existing conversation - use dict format with 'user' type
+                new_message = {
+                    "type": "user",
+                    "content": message_content,
+                    "role": "user"
+                }
                 existing_state["messages"].append(new_message)
                 
                 # Update context
@@ -428,10 +588,18 @@ async def send_chat_message_with_file(
             # TODO: ERROR HANDLING - Extract the response from the result and check for errors
             if result and "messages" in result and len(result["messages"]) > 0:
                 last_message = result["messages"][-1]
+                print(f"🔍 CHAT API (FILE): Last message type: {type(last_message)}")
+                print(f"🔍 CHAT API (FILE): Last message: {last_message}")
+                
                 if hasattr(last_message, 'content'):
                     response_text = last_message.content
+                    print(f"🔍 CHAT API (FILE): Extracted content from object message: {response_text[:100]}...")
+                elif isinstance(last_message, dict) and 'content' in last_message:
+                    response_text = last_message['content']
+                    print(f"🔍 CHAT API (FILE): Extracted content from dict message: {response_text[:100]}...")
                 else:
                     response_text = str(last_message)
+                    print(f"🔍 CHAT API (FILE): Using string conversion: {response_text[:100]}...")
                 
                 # TODO: ERROR HANDLING - Check if the response indicates an error
                 is_error = any(error_indicator in response_text for error_indicator in [
@@ -453,31 +621,52 @@ async def send_chat_message_with_file(
             
             # Save the updated state
             try:
-                await session_manager.save_session(session_id, result)
-                print(f"💾 CHAT API: Saved session {session_id}")
+                # Convert result to serializable format before saving
+                serializable_result = _make_serializable(result)
+                print(f"🔍 DEBUG: Saving conversation state with data: {serializable_result.get('data', {})}")
+                print(f"🔍 DEBUG: Session ID: {session_id}, User ID: {current_user.user_id}")
+                print(f"🔍 DEBUG: Full serializable_result keys: {list(serializable_result.keys())}")
+
+                # Save conversation state to session using the same session_id as retrieval
+                await session_manager.store_chat_session(
+                    session_id,  # Use the same session_id as retrieval
+                    str(current_user.user_id),
+                    {"conversation_state": serializable_result}
+                )
+                print(f"🔍 DEBUG: Conversation state saved successfully")
+                print(f"🔄 CHAT API: Saved conversation state with {len(serializable_result.get('messages', []))} messages")
             except Exception as e:
-                print(f"⚠️ CHAT API: Failed to save session: {e}")
+                print(f"⚠️ CHAT API: Failed to save conversation state: {e}")
+                import traceback
+                print(f"🔍 DEBUG: Save error traceback: {traceback.format_exc()}")
             
             # TODO: ERROR HANDLING - Return success: false for errors to trigger frontend clearing
-            return {
-                "response": response_text,
-                "agent": agent_name,
-                "success": not is_error,  # TODO: ERROR HANDLING - Set success based on error detection
-                "timestamp": datetime.now().isoformat(),
-                "session_id": session_id,
-                "workflow_id": result.get("workflow_id"),
-                "data": result.get("data", {})
-            }
+            print(f"🔍 CHAT API (FILE): Final response being returned:")
+            print(f"🔍 CHAT API (FILE): - response: {response_text[:100]}...")
+            print(f"🔍 CHAT API (FILE): - response type: {type(response_text)}")
+            print(f"🔍 CHAT API (FILE): - response length: {len(str(response_text))}")
+            print(f"🔍 CHAT API (FILE): - success: {not is_error}")
+            
+            return ChatResponse(
+                response=response_text,
+                agent=agent_name,
+                success=not is_error,  # TODO: ERROR HANDLING - Set success based on error detection
+                timestamp=datetime.now().isoformat(),
+                session_id=session_id,
+                workflow_id=result.get("workflow_id"),
+                data=result.get("data", {})
+            )
             
     except Exception as e:
         print(f"❌ Chat processing with file failed: {str(e)}")
-        return {
-            "response": f"I encountered an error processing your request with file: {str(e)}",
-            "agent": "error_handler",
-            "success": False,
-            "status": "chat_with_file_error",
-            "error": str(e)
-        }
+        return ChatResponse(
+            response=f"I encountered an error processing your request with file: {str(e)}",
+            agent="error_handler",
+            success=False,
+            timestamp=datetime.now().isoformat(),
+            session_id="error-session",
+            data={"error": str(e)}
+        )
 
 @router.post("/message")
 async def send_chat_message(chat_request: ChatRequest, request: Request):
@@ -644,6 +833,11 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 print(f"🔍 DEBUG: Raw chat session data: {chat_session_data}")
                 if chat_session_data and "conversation_state" in chat_session_data:
                     existing_state = chat_session_data["conversation_state"]
+
+                    # Normalize message roles to fix OpenAI API compatibility
+                    if existing_state.get('messages'):
+                        existing_state['messages'] = _normalize_message_roles(existing_state['messages'])
+
                     print(f"🔄 CHAT API: Loaded existing conversation state with {len(existing_state.get('messages', []))} messages")
                     print(f"🔍 DEBUG: Existing state data: {existing_state.get('data', {})}")
                 else:
@@ -653,8 +847,12 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
             
             # Create or update state
             if existing_state:
-                # Add new message to existing conversation
-                new_message = HumanMessage(content=message_content)
+                # Add new message to existing conversation - use dict format with 'user' type
+                new_message = {
+                    "type": "user",
+                    "content": message_content,
+                    "role": "user"
+                }
                 existing_state["messages"].append(new_message)
                 
                 # Update context
@@ -678,31 +876,175 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                     initial_message=initial_message
                 )
                 
-                # Add database to context
-                #initial_state["context"]["database"] = db
+            # Add database to context (removed to avoid unhashable type error)
+            #initial_state["context"]["database"] = db
                 print(f"🔄 CHAT API: Created new conversation state")
             
             # Add file_info to context if provided
             if hasattr(chat_request, 'file_info') and chat_request.file_info:
                 initial_state["context"]["file_info"] = chat_request.file_info
 
+            # Ensure all messages are properly serializable
+            if initial_state.get("messages"):
+                serializable_messages = []
+                for msg in initial_state["messages"]:
+                    if hasattr(msg, 'type') and hasattr(msg, 'content'):
+                        # LangChain message object - convert to dict
+                        serializable_messages.append({
+                            "type": msg.type,
+                            "content": msg.content,
+                            "role": getattr(msg, 'role', msg.type)
+                        })
+                    elif isinstance(msg, dict):
+                        # Already a dict - ensure it's properly structured
+                        if 'type' not in msg:
+                            msg['type'] = msg.get('role', 'user')
+                        if 'role' not in msg:
+                            msg['role'] = msg.get('type', 'user')
+                        serializable_messages.append(msg)
+                    else:
+                        # Fallback - convert to string
+                        serializable_messages.append({
+                            "type": "unknown",
+                            "content": str(msg),
+                            "role": "unknown"
+                        })
+                initial_state["messages"] = serializable_messages
+
+            # Ensure all state values are hashable/serializable - ULTRA AGGRESSIVE APPROACH
+            print(f"🔍 DEBUG: Before serialization - state keys: {list(initial_state.keys())}")
+
+            # First, make everything serializable
+            initial_state = _make_serializable_state(initial_state)
+            print(f"🔍 DEBUG: After first serialization - state keys: {list(initial_state.keys())}")
+
+            # Second pass - ensure no dictionaries are used as keys anywhere
+            initial_state = _ensure_no_dict_keys(initial_state)
+            print(f"🔍 DEBUG: After second pass - state keys: {list(initial_state.keys())}")
+
+            # Third pass - validate hashability
+            try:
+                _validate_state_hashable(initial_state)
+                print("✅ State validation passed - all values are hashable")
+            except Exception as validation_error:
+                print(f"❌ State validation failed: {validation_error}")
+                # Create a minimal state as fallback
+                initial_state = {
+                    "messages": [{"type": "user", "content": message_content, "role": "user"}],
+                    "current_agent": "router",
+                    "data": {},
+                    "status": "routing",
+                    "context": {
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "user_name": current_user.user_full_name or current_user.user.email,
+                        "user_role": current_user.role,
+                        "conversation_start": datetime.now().isoformat(),
+                        "last_interaction": datetime.now().isoformat(),
+                        "interaction_count": 1
+                    }
+                }
+                print("✅ Created minimal fallback state")
+
+            # DEBUG: Add additional validation before LangGraph invocation
+            try:
+                # Validate that all state values are hashable
+                _validate_state_hashable(initial_state)
+                print("✅ State validation passed - all values are hashable")
+            except Exception as validation_error:
+                print(f"❌ State validation failed: {validation_error}")
+                # Continue anyway, but log the issue
+
             # 🚀 PHASE 2 OPTIMIZATION: Reduced recursion limit to prevent multiple iterations
             # TODO: If agent responses become incomplete or tools don't execute properly, revert recursion_limit to 10
             print(f"🔍 DEBUG: Invoking agent with recursion_limit=20")
             print(f"🔍 DEBUG: Initial state keys: {list(initial_state.keys())}")
             print(f"🔍 DEBUG: Context keys: {list(initial_state.get('context', {}).keys())}")
-            result = await agent_app.ainvoke(initial_state, config={"recursion_limit": 20})
+
+            # 🚀 PHASE 2 OPTIMIZATION: Reduced recursion limit to prevent multiple iterations
+            # TODO: If agent responses become incomplete or tools don't execute properly, revert recursion_limit to 10
+            try:
+                result = await agent_app.ainvoke(initial_state, config={"recursion_limit": 20})
+                print(f"🔍 DEBUG: Agent invocation completed successfully")
+            except Exception as langgraph_error:
+                print(f"❌ LangGraph invocation failed: {langgraph_error}")
+                # Try with minimal state as last resort
+                try:
+                    minimal_state = {
+                        "messages": [{"type": "user", "content": message_content, "role": "user"}],
+                        "current_agent": "router",
+                        "data": {},
+                        "status": "routing",
+                        "context": {
+                            "user_id": user_id,
+                            "session_id": session_id,
+                            "user_name": current_user.user_full_name or current_user.user.email,
+                            "user_role": current_user.role,
+                            "conversation_start": datetime.now().isoformat(),
+                            "last_interaction": datetime.now().isoformat(),
+                            "interaction_count": 1
+                        }
+                    }
+                    print("🔄 Trying with minimal state...")
+                    result = await agent_app.ainvoke(minimal_state, config={"recursion_limit": 5})
+                    print(f"✅ Minimal state invocation successful")
+                except Exception as minimal_error:
+                    print(f"❌ Minimal state also failed: {minimal_error}")
+                    # Create a fallback result structure
+                    result = {
+                        "messages": [{"content": "I'm sorry, I encountered an error processing your request. Please try again.", "role": "assistant"}],
+                        "context": {
+                            "user_id": user_id,
+                            "session_id": session_id,
+                            "agent": "error_handler"
+                        },
+                        "data": {},
+                        "status": "error"
+                    }
+                    print("✅ Created fallback result structure")
+
             print(f"🔍 DEBUG: Agent invocation completed")
             
             # 3. Extract the response from the result
             response_content = "I'm processing your request..."
-            
+
             if "messages" in result and result["messages"]:
                 last_message = result["messages"][-1]
+                print(f"🔍 DEBUG: Last message type: {type(last_message)}")
+                print(f"🔍 DEBUG: Last message: {last_message}")
+
                 if hasattr(last_message, 'content'):
                     response_content = last_message.content
+                    print(f"🔍 DEBUG: Extracted content from LangChain message: {response_content[:100]}...")
                 elif isinstance(last_message, dict) and 'content' in last_message:
                     response_content = last_message['content']
+                    print(f"🔍 CHAT API: Extracted content from dict message: {response_content[:100]}...")
+                    print(f"🔍 CHAT API: Dict message keys: {list(last_message.keys())}")
+                    if 'data' in last_message:
+                        print(f"🔍 CHAT API: Message has data field with keys: {list(last_message['data'].keys()) if isinstance(last_message['data'], dict) else 'Not a dict'}")
+                    else:
+                        print(f"🔍 CHAT API: Message has no data field")
+                else:
+                    # Fallback - convert to string and try to extract content
+                    last_message_str = str(last_message)
+                    print(f"🔍 DEBUG: Last message as string: {last_message_str[:200]}...")
+
+                    # Try to parse as JSON if it looks like a dict
+                    if last_message_str.startswith("{") and "content" in last_message_str:
+                        try:
+                            import json
+                            parsed = json.loads(last_message_str)
+                            if isinstance(parsed, dict) and 'content' in parsed:
+                                response_content = parsed['content']
+                                print(f"🔍 DEBUG: Extracted content from JSON string: {response_content[:100]}...")
+                        except:
+                            response_content = last_message_str
+                    else:
+                        response_content = last_message_str
+
+            print(f"🔍 CHAT API: Final response_content: {response_content[:200]}...")
+            print(f"🔍 CHAT API: Final response_content type: {type(response_content)}")
+            print(f"🔍 CHAT API: Final response_content length: {len(str(response_content))}")
 
             # 4. Save updated conversation state for context persistence
             try:
@@ -740,7 +1082,22 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
             ])
             
             # 5. Return JSON response with "Milo" as agent name
-            return ChatResponse(
+            # Safe data extraction with fallbacks
+            agent_response_times = {}
+            if isinstance(result, dict) and "agent_response_times" in result:
+                agent_response_times = result["agent_response_times"] or {}
+
+            result_status = "completed"
+            if isinstance(result, dict) and "status" in result:
+                result_status = result["status"] or "completed"
+
+            print(f"🔍 CHAT API: Final ChatResponse being returned:")
+            print(f"🔍 CHAT API: - response: {response_content[:100]}...")
+            print(f"🔍 CHAT API: - response type: {type(response_content)}")
+            print(f"🔍 CHAT API: - response length: {len(str(response_content))}")
+            print(f"🔍 CHAT API: - success: {not is_error}")
+            
+            final_response = ChatResponse(
                 response=response_content,
                 agent="Milo",
                 success=not is_error,  # TODO: ERROR HANDLING - Set success based on error detection
@@ -748,10 +1105,13 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 session_id=current_user.session_id,
                 workflow_id=f"workflow_{datetime.now().timestamp()}",
                 data={
-                    "processing_time": result.get("agent_response_times", {}),
-                    "status": result.get("status", "completed")
+                    "processing_time": agent_response_times,
+                    "status": result_status
                 }
             )
+            
+            print(f"🔍 CHAT API: ChatResponse object created successfully")
+            return final_response
 
     except Exception as e:
         
@@ -794,9 +1154,44 @@ async def send_chat_message_stream(
             user_role=current_user.role,
             initial_message=initial_message
         )
-        
-        # Add database to context
+
+        # Add database to context (removed to avoid unhashable type error)
         #initial_state["context"]["database"] = db
+
+        # Convert messages to serializable format before invoking agent
+        if initial_state.get("messages"):
+            serializable_messages = []
+            for msg in initial_state["messages"]:
+                if hasattr(msg, 'type') and hasattr(msg, 'content'):
+                    # LangChain message object
+                    serializable_messages.append({
+                        "type": msg.type,
+                        "content": msg.content,
+                        "role": getattr(msg, 'role', msg.type)
+                    })
+                elif isinstance(msg, dict):
+                    # Already a dict
+                    serializable_messages.append(msg)
+                else:
+                    # Fallback - convert to string
+                    serializable_messages.append({
+                        "type": "unknown",
+                        "content": str(msg),
+                        "role": "unknown"
+                    })
+            initial_state["messages"] = serializable_messages
+
+        # Ensure all state values are hashable/serializable
+        initial_state = _make_serializable_state(initial_state)
+
+        # DEBUG: Add additional validation before LangGraph invocation
+        try:
+            # Validate that all state values are hashable
+            _validate_state_hashable(initial_state)
+            print("✅ Stream state validation passed - all values are hashable")
+        except Exception as validation_error:
+            print(f"❌ Stream state validation failed: {validation_error}")
+            # Continue anyway, but log the issue
 
         # 🚀 PHASE 2 OPTIMIZATION: Reduced recursion limit for streaming responses
         # TODO: If streaming responses become incomplete, revert recursion_limit to 10

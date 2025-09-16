@@ -5,7 +5,7 @@ This module provides improved routing logic to ensure requests are correctly
 classified and routed to the appropriate specialized agent.
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 import re
 
 
@@ -156,34 +156,48 @@ class EnhancedRoutingLogic:
             "delete": ["delete", "remove", "terminate", "deactivate"]
         }
     
-    def classify_request(self, user_message: str) -> Dict[str, any]:
+    def classify_request(self, user_message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Classify a user request to determine the appropriate agent.
-        
+
+        Args:
+            user_message: The user's message
+            context: Optional context from previous conversation state
+
         Returns:
             Dict containing agent_name, confidence, reasoning, and operation_type
         """
         message_lower = user_message.lower()
-        
+
         # Step 1: Identify operation type
         operation_type = self._identify_operation_type(message_lower)
-        
-        # Step 2: Score each agent based on keyword matches
+
+        # Step 2: Check for contract ID responses (special case)
+        if self._is_contract_id_response(user_message, context):
+            return {
+                "agent_name": "contract_agent",
+                "confidence": "high",
+                "reasoning": "Detected contract ID response - routing to contract agent",
+                "operation_type": "contract_response",
+                "scores": {"contract_agent": 10.0, "client_agent": 0.0, "employee_agent": 0.0}
+            }
+
+        # Step 3: Score each agent based on keyword matches
         agent_scores = self._calculate_agent_scores(user_message, message_lower)
-        
-        # Step 3: Apply context-aware adjustments
+
+        # Step 4: Apply context-aware adjustments
         adjusted_scores = self._apply_context_adjustments(
             user_message, message_lower, agent_scores, operation_type
         )
-        
-        # Step 4: Determine the best agent
+
+        # Step 5: Determine the best agent
         best_agent, confidence = self._select_best_agent(adjusted_scores)
-        
-        # Step 5: Generate reasoning
+
+        # Step 6: Generate reasoning
         reasoning = self._generate_reasoning(
             best_agent, operation_type, adjusted_scores, user_message
         )
-        
+
         return {
             "agent_name": best_agent,
             "confidence": confidence,
@@ -349,7 +363,30 @@ class EnhancedRoutingLogic:
         has_contact_info = any(word in message_lower for word in ["contact", "email", "@", "phone"])
         
         return has_company and has_contact_info
-    
+
+    def _is_contract_id_response(self, user_message: str, context: Dict[str, Any] = None) -> bool:
+        """Check if the user message is a contract ID response that should be routed to contract agent."""
+        # Check if message is just a number (potential contract ID)
+        if not user_message.strip().isdigit():
+            return False
+
+        # If we have context indicating a pending contract operation, route to contract agent
+        if context:
+            # Check for file upload context (indicates document upload operation)
+            if context.get('file_info') or 'file_info' in str(context):
+                return True
+
+            # Check for pending contract operations
+            user_operation = context.get('user_operation', '')
+            if any(op in user_operation.lower() for op in ['contract', 'upload', 'document']):
+                return True
+
+            # Check for contract-related context
+            if context.get('current_contract_id') or 'contract' in str(context).lower():
+                return True
+
+        return False
+
     def _select_best_agent(self, scores: Dict[str, float]) -> Tuple[str, str]:
         """Select the best agent based on scores."""
         if not scores or all(score == 0 for score in scores.values()):

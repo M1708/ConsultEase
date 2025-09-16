@@ -276,12 +276,10 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                 # Multiple contracts - ask user to choose
                 contract_list = []
                 for i, c in enumerate(contracts, 1):
-                    contract_info = f"{i}. **Contract ID {c.contract_id}**: {c.contract_type}"
-                    if c.original_amount:
-                        contract_info += f" (${c.original_amount:,.2f})"
-                    contract_info += f" - {c.status}"
-                    if c.start_date:
-                        contract_info += f" (Start: {c.start_date})"
+                    amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
+                    status = c.status.lower()
+                    start_date = str(c.start_date) if c.start_date else "Not set"
+                    contract_info = f"{i}. Contract ID {c.contract_id}: {c.contract_type} ({amount}) - {status}, start date ({start_date})"
                     contract_list.append(contract_info)
                 
                 
@@ -458,6 +456,7 @@ async def smart_contract_document_tool(params: ContractDocumentParams) -> Contra
 
 async def upload_contract_document_tool(params: UploadContractDocumentParams, context: Optional[Dict[str, Any]] = None) -> ContractToolResult:
     """Upload contract document for a client's contract"""
+    print(f"🔍 UPLOAD TOOL: Called for client '{params.client_name}', contract_id: {params.contract_id}")
     try:
         async with get_ai_db() as session:
             # Find contract (same logic as smart_contract_document_tool)
@@ -480,7 +479,7 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                         success=False,
                         message=f"❌ Client '{params.client_name}' not found."
                     )
-                
+
                 # Get all contracts for the client
                 contracts_result = await session.execute(select(Contract).options(
                     selectinload(Contract.client)
@@ -488,22 +487,23 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                     Contract.client_id == client.client_id
                 ).order_by(Contract.created_at.desc()))
                 contracts = contracts_result.scalars().all()
-                
+                print(f"🔍 UPLOAD TOOL: Found {len(contracts)} contracts for client '{client.client_name}'")
+
                 if not contracts:
                     return ContractToolResult(
                         success=False,
                         message=f"❌ No contracts found for client '{client.client_name}'. Please create a contract first."
                     )
-                
+
                 # If multiple contracts, check if this is a "create + upload" workflow
                 if len(contracts) > 1:
                     # Check if there's a recently created contract in session context (within last 2 minutes)
                     last_created_contract = None
                     if context and 'last_created_contract' in context:
                         last_created = context['last_created_contract']
-                        if (last_created.get('client_name') == client.client_name and 
+                        if (last_created.get('client_name') == client.client_name and
                             last_created.get('contract_id')):
-                            
+
                             # Check if the contract was created recently (within 2 minutes)
                             from datetime import datetime, timedelta
                             if last_created.get('created_at'):
@@ -516,25 +516,40 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                                             if c.contract_id == last_created['contract_id']:
                                                 last_created_contract = c
                                                 break
-                                except (ValueError, TypeError):
+                                except (ValueError, TypeError) as e:
                                     # Invalid date format, ignore context
                                     pass
-                    
+
                     if last_created_contract:
                         # Use the recently created contract from session context
                         contract = last_created_contract
+                        print(f"🔍 UPLOAD TOOL: Using recently created contract: {contract.contract_id}")
                     else:
                         # Ask for clarification - show all contracts for the client
+                        print(f"🔍 UPLOAD TOOL: Multiple contracts found, asking for clarification")
                         contract_list = []
-                        for c in contracts:
-                            contract_list.append(f"- **Contract ID {c.contract_id}**: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
-                        
-                        return ContractToolResult(
-                            success=False,
-                            message=f"❌ Client '{client.client_name}' has {len(contracts)} contracts. Please specify which contract ID you want to upload the document for:\n\n" + "\n".join(contract_list) + "\n\nUse: 'upload document for [client] contract [ID]'"
-                        )
-                
-                contract = contracts[0]
+                        for i, c in enumerate(contracts, 1):
+                            amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
+                            status = c.status.lower()
+                            start_date = str(c.start_date) if c.start_date else "Not set"
+                            contract_list.append(f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})")
+
+            # Create the response
+            response_message = f"📋 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to upload the document for (e.g., \"upload document for {client.client_name} contract {contracts[0].contract_id}\")."
+            
+            print(f"🔍 UPLOAD TOOL: Returning response with {len(contract_list)} contracts")
+            print(f"🔍 UPLOAD TOOL: Response message length: {len(response_message)} characters")
+            print(f"🔍 UPLOAD TOOL: Response message preview: {response_message[:100]}...")
+            
+            return ContractToolResult(
+                success=True,
+                message=response_message
+            )
+
+        # If only one contract, use it directly
+        if len(contracts) == 1:
+            contract = contracts[0]
+            print(f"🔍 UPLOAD TOOL: Using single contract: {contract.contract_id}")
             
             # Upload document using storage service
             
@@ -689,12 +704,12 @@ async def smart_create_contract_tool(params: SmartContractParams, context: Dict[
             result = await create_contract_internal(contract_data, session, user_id)
             
             # Store the created contract in session context for document upload
+            # CRITICAL FIX: Ensure all values are hashable/serializable to prevent unhashable type errors
             if context:
-                if 'last_created_contract' not in context:
-                    context['last_created_contract'] = {}
+                # Convert all values to strings to ensure hashability
                 context['last_created_contract'] = {
-                    'contract_id': result.contract_id,
-                    'client_name': client.client_name,
+                    'contract_id': str(result.contract_id),
+                    'client_name': str(client.client_name),
                     'created_at': result.created_at.isoformat() if result.created_at else None
                 }
             
@@ -1448,7 +1463,7 @@ async def delete_contract_document_tool(params: DeleteContractDocumentParams) ->
                 if len(contracts) > 1:
                     contract_list = []
                     for c in contracts:
-                        contract_list.append(f"- **Contract ID {c.contract_id}**: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
+                        contract_list.append(f"- Contract ID {c.contract_id}: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
                     
                     return ContractToolResult(
                         success=False,
@@ -1611,11 +1626,12 @@ async def delete_contract_tool(params: DeleteContractParams, context: Optional[D
                         # Ask user to specify which one or use "all"
                         contract_list = []
                         for c in contracts:
-                            contract_list.append(f"- **Contract ID {c.contract_id}**: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
+                            contract_list.append(f"- Contract ID {c.contract_id}: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
                         
                         # Store current client in context
+                        # CRITICAL FIX: Ensure all values are hashable/serializable to prevent unhashable type errors
                         if context:
-                            context['current_client'] = client.client_name
+                            context['current_client'] = str(client.client_name)
                         
                         return ContractToolResult(
                             success=False,
@@ -1695,7 +1711,7 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
                 
                 contract_list = []
                 for c in contracts:
-                    contract_list.append(f"- **Contract ID {c.contract_id}**: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
+                    contract_list.append(f"- Contract ID {c.contract_id}: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
                 
                 return ContractToolResult(
                     success=False,

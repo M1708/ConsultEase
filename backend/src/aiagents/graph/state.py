@@ -1,7 +1,7 @@
 from typing import List, TypedDict, Optional, Any, Dict
 from datetime import datetime
 
-class ConversationContext(TypedDict):
+class ConversationContext(TypedDict, total=False):
     """Context information for the current conversation"""
     user_id: str
     session_id: str
@@ -11,7 +11,7 @@ class ConversationContext(TypedDict):
     last_interaction: str
     interaction_count: int
 
-class AgentMemory(TypedDict):
+class AgentMemory(TypedDict, total=False):
     """Memory information for agents"""
     conversation_history: List[Dict[str, Any]]
     user_preferences: Dict[str, Any]
@@ -19,44 +19,44 @@ class AgentMemory(TypedDict):
     previous_tasks: List[Dict[str, Any]]
     learned_patterns: Dict[str, Any]
 
-class ErrorRecovery(TypedDict):
+class ErrorRecovery(TypedDict, total=False):
     """Error recovery and retry information"""
     error_count: int
     last_error: Optional[str]
     recovery_attempts: List[Dict[str, Any]]
     fallback_agent: Optional[str]
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     """Enhanced state for our agentic application with memory and context."""
-    # Core message history
-    messages: List[Any]
-    
+    # Core message history - using Dict to make it more serializable
+    messages: List[Dict[str, Any]]
+
     # Current agent information
     current_agent: str
     previous_agent: Optional[str]
     agent_handoff_reason: Optional[str]
-    
+
     # Data payload for workflows or tools
     data: Dict[str, Any]
-    
+
     # Status tracking
     status: str  # e.g., "routing", "in_workflow", "failed", "complete", "agent_handoff"
     error_message: Optional[str]
-    
+
     # Enhanced context and memory
     context: ConversationContext
     memory: AgentMemory
     error_recovery: ErrorRecovery
-    
+
     # Agent coordination
     active_agents: List[str]  # Agents currently involved in the conversation
     pending_handoffs: List[Dict[str, Any]]  # Planned agent handoffs
     collaboration_mode: bool  # Whether multiple agents are collaborating
-    
+
     # Performance tracking
     processing_start_time: Optional[str]
     agent_response_times: Dict[str, float]
-    
+
     # Validation and quality
     input_validated: bool
     output_validated: bool
@@ -71,9 +71,26 @@ def create_initial_state(
 ) -> AgentState:
     """Create initial state for a new conversation"""
     current_time = datetime.now().isoformat()
-    
+
+    # Ensure initial_message is serializable
+    if hasattr(initial_message, '__dict__'):
+        # Convert LangChain message to dict
+        serializable_message = {
+            "type": getattr(initial_message, 'type', 'user'),
+            "content": getattr(initial_message, 'content', str(initial_message)),
+            "role": getattr(initial_message, 'role', getattr(initial_message, 'type', 'user'))
+        }
+    elif isinstance(initial_message, dict):
+        serializable_message = initial_message.copy()
+    else:
+        serializable_message = {
+            "type": "user",
+            "content": str(initial_message),
+            "role": "user"
+        }
+
     return AgentState(
-        messages=[initial_message],
+        messages=[serializable_message],
         current_agent="router",
         previous_agent=None,
         agent_handoff_reason=None,

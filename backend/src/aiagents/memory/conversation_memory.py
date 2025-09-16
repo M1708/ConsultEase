@@ -7,8 +7,8 @@ import json
 import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from src.auth.session_manager import SessionManager
-from src.aiagents.graph.state import AgentState, AgentMemory
+from ...auth.session_manager import SessionManager
+from ..graph.state import AgentState, AgentMemory
 
 
 class ConversationMemoryManager:

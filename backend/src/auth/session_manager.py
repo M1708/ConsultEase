@@ -188,12 +188,18 @@ class SessionManager:
             return self.redis_client.delete(*session_keys)
         return 0
     
+    async def save_session(self, session_id: str, session_data: Dict[str, Any]):
+        """Save session data (alias for store_chat_session for backward compatibility)"""
+        print(f"🔍 DEBUG: save_session called with session_id={session_id}")
+        # For now, just store as chat session with empty user_id
+        await self.store_chat_session(session_id, "", session_data)
+
     async def store_chat_session(self, session_id: str, user_id: str, chat_data: Dict[str, Any]):
         """Store chat session data"""
         print(f"🔍 DEBUG: store_chat_session called with session_id={session_id}, user_id={user_id}")
         print(f"🔍 DEBUG: Redis available: {self.redis_available}, Redis client: {self.redis_client is not None}")
-        print(f"🔍 DEBUG: Chat data to store: {chat_data}")
-        
+        print(f"🔍 DEBUG: Chat data keys: {list(chat_data.keys()) if isinstance(chat_data, dict) else type(chat_data)}")
+
         if not self.redis_client:
             # Mock implementation
             chat_key = f"chat:{session_id}:user:{user_id}"
@@ -201,15 +207,20 @@ class SessionManager:
             self._mock_chats[chat_key] = chat_data
             print(f"🔍 DEBUG: Mock storage complete")
             return
-        
+
         # Redis implementation
         chat_key = f"chat:{session_id}:user:{user_id}"
         print(f"🔍 DEBUG: Redis implementation, chat_key: {chat_key}")
         try:
-            self.redis_client.setex(chat_key, self.session_ttl, json.dumps(chat_data))
+            # Convert to JSON-serializable format to avoid unhashable type errors
+            serializable_data = self._make_serializable(chat_data)
+            self.redis_client.setex(chat_key, self.session_ttl, json.dumps(serializable_data))
             print(f"🔍 DEBUG: Redis storage complete")
         except Exception as e:
             print(f"🔍 DEBUG: Redis error in store_chat_session: {e}")
+            print(f"🔍 DEBUG: Error type: {type(e)}")
+            import traceback
+            print(f"🔍 DEBUG: Full traceback: {traceback.format_exc()}")
     
     async def get_chat_session(self, session_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Get chat session data"""
@@ -240,3 +251,68 @@ class SessionManager:
         except Exception as e:
             print(f"🔍 DEBUG: Redis error in get_chat_session: {e}")
             return None
+
+    def _make_serializable(self, obj, max_depth=10, current_depth=0):
+        """Convert objects to JSON-serializable format with depth protection"""
+        if current_depth >= max_depth:
+            return str(obj)  # Prevent infinite recursion
+
+        if hasattr(obj, 'model_dump'):
+            # Pydantic models
+            try:
+                return obj.model_dump()
+            except Exception:
+                return str(obj)
+        elif hasattr(obj, '__dict__'):
+            # OpenAI ChatCompletionMessage objects
+            if hasattr(obj, 'content') and hasattr(obj, 'role'):
+                result = {
+                    'role': obj.role,
+                    'content': obj.content,
+                    'type': getattr(obj, 'type', 'assistant')
+                }
+                # Handle tool_calls safely
+                if hasattr(obj, 'tool_calls') and obj.tool_calls:
+                    try:
+                        result['tool_calls'] = self._make_serializable(obj.tool_calls, max_depth, current_depth + 1)
+                    except Exception:
+                        result['tool_calls'] = []
+                return result
+            else:
+                # Generic object with __dict__
+                result = {}
+                for key, value in obj.__dict__.items():
+                    if not key.startswith('_'):  # Skip private attributes
+                        try:
+                            result[key] = self._make_serializable(value, max_depth, current_depth + 1)
+                        except Exception:
+                            result[key] = str(value)
+                return result
+        elif isinstance(obj, dict):
+            result = {}
+            for key, value in obj.items():
+                try:
+                    # Ensure key is hashable
+                    if isinstance(key, (str, int, float, bool, type(None))):
+                        result[key] = self._make_serializable(value, max_depth, current_depth + 1)
+                    else:
+                        result[str(key)] = self._make_serializable(value, max_depth, current_depth + 1)
+                except Exception:
+                    result[str(key)] = str(value)
+            return result
+        elif isinstance(obj, (list, tuple)):
+            result = []
+            for item in obj:
+                try:
+                    result.append(self._make_serializable(item, max_depth, current_depth + 1))
+                except Exception:
+                    result.append(str(item))
+            return result
+        elif isinstance(obj, (str, int, float, bool, type(None))):
+            return obj
+        else:
+            # Fallback to string representation for any other type
+            try:
+                return str(obj)
+            except Exception:
+                return "<unserializable_object>"

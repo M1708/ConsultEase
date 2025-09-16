@@ -14,7 +14,15 @@ import { Upload, Clock, FileText, X, User, Bot, Send } from "lucide-react";
 export default function ChatPage() {
   const router = useRouter();
   const { user, logout } = useAuth();
-  const { messages, isTyping, sendMessage, clearChat, sessionId, setTyping, setMessages } = useChat();
+  const {
+    messages,
+    isTyping,
+    sendMessage,
+    clearChat,
+    sessionId,
+    setTyping,
+    setMessages,
+  } = useChat();
   const { loadChatSession, saveChatSession } = useChatSession();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -181,24 +189,31 @@ export default function ChatPage() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('🚀 Frontend: handleSendMessage called', { selectedFile, inputMessage, isTyping });
+    console.log("🚀 Frontend: handleSendMessage called", {
+      selectedFile,
+      inputMessage,
+      isTyping,
+    });
     if ((!selectedFile && !inputMessage) || isTyping) return;
 
     // TODO: INPUT CLEARING FIX - Clear input immediately when user hits enter
     const messageToSend = inputMessage.trim();
     const fileToSend = selectedFile;
-    
+
     // Clear input immediately
     setInputMessage("");
     setSelectedFile(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
-    console.log('🧹 Frontend: Input cleared immediately when user hit enter');
-    
+    console.log("🧹 Frontend: Input cleared immediately when user hit enter");
+
     try {
       if (fileToSend && messageToSend) {
-        console.log('🚀 Frontend: Calling sendMessageWithFile', { selectedFile: fileToSend.name, inputMessage: messageToSend });
+        console.log("🚀 Frontend: Calling sendMessageWithFile", {
+          selectedFile: fileToSend.name,
+          inputMessage: messageToSend,
+        });
         // NEW: Send file with message to agentic endpoint
         await sendMessageWithFile(fileToSend, messageToSend);
       } else if (messageToSend) {
@@ -221,10 +236,13 @@ export default function ChatPage() {
 
   // NEW: Function for sending file with message to agentic endpoint
   const sendMessageWithFile = async (file: File, message: string) => {
-    console.log('🚀 Frontend: sendMessageWithFile called', { file: file.name, message });
+    console.log("🚀 Frontend: sendMessageWithFile called", {
+      file: file.name,
+      message,
+    });
     try {
       setTyping(true);
-      
+
       // Add user message to chat immediately
       const userMessage: ChatMessage = {
         id: `user_${Date.now()}`,
@@ -237,38 +255,44 @@ export default function ChatPage() {
         isUser: true,
         data: {},
       };
-      
-      setMessages(prev => [...prev, userMessage]);
-      
+
+      setMessages((prev) => [...prev, userMessage]);
+
       // Send to new agentic endpoint
       const formData = new FormData();
-      formData.append('message', message);
-      formData.append('file', file);
-      formData.append('session_id', sessionId);
-      
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      formData.append("message", message);
+      formData.append("file", file);
+      formData.append("session_id", sessionId);
+
+      const API_BASE_URL =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const token = localStorage.getItem("supabase_token");
-      const response = await fetch(`${API_BASE_URL}/api/chat/message-with-file`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData,
-      });
-      
+      const response = await fetch(
+        `${API_BASE_URL}/api/chat/message-with-file`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        }
+      );
+
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Backend error response:', errorText);
-        throw new Error(`Failed to send message with file: ${response.status} - ${errorText}`);
+        console.error("Backend error response:", errorText);
+        throw new Error(
+          `Failed to send message with file: ${response.status} - ${errorText}`
+        );
       }
-      
+
       const result = await response.json();
-      
+
       // Check if the request was successful
       if (!result.success) {
-        throw new Error(result.response || result.error || 'Request failed');
+        throw new Error(result.response || result.error || "Request failed");
       }
-      
+
       // Add agent response to chat
       const agentMessage: ChatMessage = {
         id: `agent_${Date.now()}`,
@@ -282,10 +306,9 @@ export default function ChatPage() {
         data: result.data,
         isUser: false,
       };
-      
-      setMessages(prev => [...prev, agentMessage]);
+
+      setMessages((prev) => [...prev, agentMessage]);
       setTyping(false);
-      
     } catch (error) {
       console.error("Failed to send message with file:", error);
       setTyping(false);
@@ -293,7 +316,9 @@ export default function ChatPage() {
       const errorMessage: ChatMessage = {
         id: `error_${Date.now()}`,
         message: `📎 ${file.name} - ${message}`,
-        response: `❌ Error: ${error instanceof Error ? error.message : 'Failed to process file'}`,
+        response: `❌ Error: ${
+          error instanceof Error ? error.message : "Failed to process file"
+        }`,
         agent: "Error",
         success: false,
         timestamp: new Date().toISOString(),
@@ -301,7 +326,7 @@ export default function ChatPage() {
         isUser: false,
         data: {},
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages((prev) => [...prev, errorMessage]);
     }
   };
 
@@ -629,14 +654,15 @@ export default function ChatPage() {
                 {selectedFile && (
                   <div className="mb-3 flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <span className="text-sm text-blue-600 flex items-center gap-2">
-                      📎 {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+                      📎 {selectedFile.name} (
+                      {(selectedFile.size / 1024).toFixed(1)} KB)
                     </span>
                     <button
                       onClick={() => {
                         setSelectedFile(null);
                         // Clear the file input to allow selecting the same file again
                         if (fileInputRef.current) {
-                          fileInputRef.current.value = '';
+                          fileInputRef.current.value = "";
                         }
                       }}
                       className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
@@ -690,7 +716,9 @@ export default function ChatPage() {
                     />
                     <button
                       type="submit"
-                      disabled={isTyping || (!inputMessage?.trim() && !selectedFile)}
+                      disabled={
+                        isTyping || (!inputMessage?.trim() && !selectedFile)
+                      }
                       className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors flex items-center space-x-2"
                       style={{ fontFamily: "Arial, sans-serif" }}
                     >

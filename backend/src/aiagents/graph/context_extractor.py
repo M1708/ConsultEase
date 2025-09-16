@@ -19,6 +19,17 @@ class ContextExtractor:
             r"for\s+([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)",
             r"['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)['\"]?"
         ]
+
+        # Exclude patterns that should not be considered client names
+        self.client_exclude_patterns = [
+            r"file\s+attached",
+            r"document\s+attached",
+            r"attachment",
+            r"upload",
+            r"update\s+client",
+            r"create\s+client",
+            r"delete\s+client"
+        ]
         
         self.workflow_patterns = [
             r"workflow['\"]?\s*:\s*['\"]?(update|delete|create|upload)['\"]?",
@@ -109,8 +120,19 @@ class ContextExtractor:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 client_name = match.group(1).strip()
+
+                # Check exclude patterns first
+                should_exclude = False
+                for exclude_pattern in self.client_exclude_patterns:
+                    if re.search(exclude_pattern, client_name, re.IGNORECASE):
+                        should_exclude = True
+                        break
+
+                if should_exclude:
+                    continue
+
                 # Filter out common false positives and overly long matches
-                if (client_name.lower() not in ['the', 'a', 'an', 'this', 'that', 'for', 'with', 'and', 'or'] 
+                if (client_name.lower() not in ['the', 'a', 'an', 'this', 'that', 'for', 'with', 'and', 'or']
                     and len(client_name) < 50  # Avoid overly long matches
                     and not client_name.lower().startswith(('update', 'delete', 'create', 'upload'))
                     and not client_name.lower().startswith(('the contract', 'contract with', 'contract id'))

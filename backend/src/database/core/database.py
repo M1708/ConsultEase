@@ -91,6 +91,38 @@ async def get_db():
         except Exception as e:
             await session.rollback()
             logger.error(f"Database session error: {str(e)}")
+            # DEBUG: Add detailed error information
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Session identity: {id(session)}")
+            # Try to get more details about what caused the error
+            try:
+                # Check if there are any pending operations (AsyncSession compatible)
+                logger.error(f"Session is_active: {session.is_active}")
+                # Check dirty/new/deleted objects
+                logger.error(f"Session dirty: {len(session.dirty) if hasattr(session, 'dirty') else 'N/A'}")
+                logger.error(f"Session new: {len(session.new) if hasattr(session, 'new') else 'N/A'}")
+                logger.error(f"Session deleted: {len(session.deleted) if hasattr(session, 'deleted') else 'N/A'}")
+                # Check connection info (AsyncSession compatible)
+                try:
+                    connection = await session.connection()
+                    logger.error(f"Session connection: {connection}")
+                except Exception as conn_e:
+                    logger.error(f"Session connection error: {conn_e}")
+
+                # DEBUG: Add stack trace to find where the error originated
+                import traceback
+                logger.error("Full stack trace:")
+                for line in traceback.format_exc().split('\n'):
+                    logger.error(f"  {line}")
+
+                # DEBUG: Try to identify what operation caused the error
+                logger.error("Attempting to identify the problematic operation...")
+                # Check if this is related to state serialization
+                if "unhashable type" in str(e):
+                    logger.error("This appears to be an unhashable type error - likely related to state processing")
+
+            except Exception as debug_e:
+                logger.error(f"Debug error: {debug_e}")
             raise
         finally:
             await session.close()
@@ -104,6 +136,25 @@ async def get_ai_db():
         except Exception as e:
             await session.rollback()
             logger.error(f"Database session error: {str(e)}")
+            # DEBUG: Add detailed error information
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Session identity: {id(session)}")
+            # Try to get more details about what caused the error
+            try:
+                # Check if there are any pending operations (AsyncSession compatible)
+                logger.error(f"Session is_active: {session.is_active}")
+                # Check dirty/new/deleted objects
+                logger.error(f"Session dirty: {len(session.dirty) if hasattr(session, 'dirty') else 'N/A'}")
+                logger.error(f"Session new: {len(session.new) if hasattr(session, 'new') else 'N/A'}")
+                logger.error(f"Session deleted: {len(session.deleted) if hasattr(session, 'deleted') else 'N/A'}")
+                # Check connection info (AsyncSession compatible)
+                try:
+                    connection = await session.connection()
+                    logger.error(f"Session connection: {connection}")
+                except Exception as conn_e:
+                    logger.error(f"Session connection error: {conn_e}")
+            except Exception as debug_e:
+                logger.error(f"Debug error: {debug_e}")
             raise
 
 async def test_async_connection():

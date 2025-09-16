@@ -29,8 +29,7 @@ from  src.aiagents.tools.client_tools import (
 from src.aiagents.tools.employee_tools import (
     create_employee_tool, update_employee_tool, search_employees_tool,
     get_employee_details_tool, get_all_employees_tool, search_profiles_by_name_tool,
-    delete_employee_tool, CreateEmployeeParams, UpdateEmployeeParams, DeleteEmployeeParams,
-    parse_employee_details_from_message
+    delete_employee_tool, CreateEmployeeParams, UpdateEmployeeParams, DeleteEmployeeParams
 )
 from src.database.core.models import Employee
 # ... import other tools for other agents as they are integrated
@@ -224,6 +223,8 @@ async def _upload_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
     # REVERT: If parameter handling issues persist, revert to original logic
     kwargs.pop('db', None)
     context = kwargs.pop('context', None)
+    
+    print(f"🔍 DEBUG: upload_contract_document_wrapper - context has file_info: {context and 'file_info' in context}")
 
     # ENHANCED PARAMETER HANDLING: Better file data replacement and validation
     if context and 'file_info' in context:
@@ -236,16 +237,25 @@ async def _upload_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
             kwargs['file_size'] = file_info.get('file_size', kwargs.get('file_size'))
             kwargs['mime_type'] = file_info.get('mime_type', kwargs.get('mime_type'))
 
-        # Ensure all required parameters are present
-        required_params = ['client_name', 'file_data', 'filename', 'file_size', 'mime_type']
+        # Ensure all required parameters are present (except placeholders)
+        required_params = ['client_name']
         missing_params = [param for param in required_params if not kwargs.get(param)]
 
         if missing_params:
             return {
                 "success": False,
-                "message": f"❌ Missing required parameters: {', '.join(missing_params)}",
+                "message": f"❌ Missing required parameters: {', '.join(missing_params)}. Please extract the client name from the user's message.",
                 "data": None
             }
+            
+        # Check if we have file_info but no actual file data
+        if not kwargs.get('file_data') or kwargs.get('file_data') == "<base64_encoded_data>":
+            if not (context and 'file_info' in context):
+                return {
+                    "success": False,
+                    "message": "❌ No file was uploaded with this message. Please use the file upload feature to attach a document.",
+                    "data": None
+                }
 
         # Validate file data format
         if kwargs.get('file_data') and not isinstance(kwargs['file_data'], str):
@@ -1028,23 +1038,51 @@ async def tool_executor_node(state: AgentState) -> Dict:
     It takes tool calls from the last message in the state, executes them, and returns the results.
     """
     # 🚀 PERFORMANCE OPTIMIZATION: Track tool execution for contract search optimization
-    
-    
+
+    print(f"🔍 DEBUG: Tool executor called - state keys: {list(state.keys()) if isinstance(state, dict) else 'Not a dict'}")
+    print(f"🔍 DEBUG: Tool executor - messages count: {len(state.get('messages', []))}")
+
     last_message = state['messages'][-1]
-    tool_calls = getattr(last_message, 'tool_calls', [])
     
+    # Handle both dict messages (serialized) and object messages
+    if isinstance(last_message, dict):
+        tool_calls = last_message.get('tool_calls', [])
+        print(f"🔍 DEBUG: Tool executor - dict message, tool_calls: {len(tool_calls)}")
+    else:
+        tool_calls = getattr(last_message, 'tool_calls', [])
+        print(f"🔍 DEBUG: Tool executor - object message, tool_calls: {len(tool_calls)}")
+
+    print(f"🔍 DEBUG: Tool executor - tool calls found: {len(tool_calls)}")
+
     if not tool_calls:
+        print(f"🔍 DEBUG: Tool executor - no tool calls, returning empty messages")
         return {"messages": []}
 
     # The database session should be in the state's data payload, but context is in state.context
     #db_session = state.get('data', {}).get('database')
     context = state.get('context', {})
 
+    print(f"🔍 DEBUG: Tool executor - context keys: {list(context.keys()) if isinstance(context, dict) else 'Not a dict'}")
+
     results = []
-    for tool_call in tool_calls:
-        tool_name = tool_call.function.name
+    for i, tool_call in enumerate(tool_calls):
+        print(f"🔍 DEBUG: Tool executor - processing tool call {i}")
+        
+        # Handle both dict and object tool calls
+        if isinstance(tool_call, dict):
+            tool_name = tool_call['function']['name']
+            tool_call_id = tool_call['id']
+            arguments_str = tool_call['function']['arguments']
+        else:
+            tool_name = tool_call.function.name
+            tool_call_id = tool_call.id
+            arguments_str = tool_call.function.arguments
+            
+        print(f"🔍 DEBUG: Tool executor - tool name: {tool_name}")
+        print(f"🔍 DEBUG: Tool executor - tool call id: {tool_call_id}")
 
         if tool_name not in TOOL_REGISTRY:
+            print(f"🔍 DEBUG: Tool executor - tool {tool_name} not in registry")
             result_content = json.dumps({"error": f"Tool '{tool_name}' not found in registry."})
         else:
             try:
@@ -1053,40 +1091,49 @@ async def tool_executor_node(state: AgentState) -> Dict:
                 if validated_tool_name != tool_name:
                     print(f"🔍 DEBUG: Tool corrected from {tool_name} to {validated_tool_name}")
                     tool_name = validated_tool_name
-                
+
                 tool_function = TOOL_REGISTRY[tool_name]
-                args = json.loads(tool_call.function.arguments)
-                
+                args = json.loads(arguments_str)
+
+                print(f"🔍 DEBUG: Tool executor - parsed arguments: {args}")
+
                 # Add the database session and context to the arguments for the wrapper
                 #args['db'] = db_session
-                
+
                 # Enhance context with extracted context from state['data']
                 enhanced_context = context.copy() if context else {}
                 if 'data' in state and state['data']:
                     enhanced_context.update(state['data'])
-                
+
                 print(f"🔍 DEBUG: Tool {tool_name} called with context:")
                 print(f"🔍 DEBUG: Original context: {context}")
                 print(f"🔍 DEBUG: State data: {state.get('data', {})}")
-                print(f"🔍 DEBUG: Enhanced context: {enhanced_context}")
-                print(f"🔍 DEBUG: Tool arguments: {args}")
-                
+                print(f"🔍 DEBUG: Enhanced context keys: {list(enhanced_context.keys()) if isinstance(enhanced_context, dict) else 'Not a dict'}")
+                print(f"🔍 DEBUG: Tool arguments keys: {list(args.keys()) if isinstance(args, dict) else 'Not a dict'}")
+
                 args['context'] = enhanced_context
-                
+
+                print(f"🔍 DEBUG: Tool executor - calling {tool_name}...")
                 output = await tool_function(**args)
-                
+                print(f"🔍 DEBUG: Tool executor - {tool_name} completed successfully")
+
                 result_content = json.dumps(output)
+                print(f"🔍 DEBUG: Tool executor - result content length: {len(result_content)}")
 
             except Exception as e:
+                print(f"❌ Tool executor - error calling {tool_name}: {e}")
+                import traceback
+                print(f"❌ Tool executor - full traceback: {traceback.format_exc()}")
                 result_content = json.dumps({"error": str(e), "tool_name": tool_name})
 
         results.append({
-            "tool_call_id": tool_call.id,
+            "tool_call_id": tool_call_id,
             "role": "tool",
             "name": tool_name,
             "content": result_content,
         })
 
+    print(f"🔍 DEBUG: Tool executor - returning {len(results)} results")
     return {"messages": results}
 
 def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
@@ -1098,7 +1145,7 @@ def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
         'update': ['update_contract', 'update_contract_by_id'],
         'delete': ['delete_contract', 'delete_contract_document'],
         'create': ['create_contract', 'create_client_and_contract', 'create_client'],
-        'upload': ['upload_contract_document'],
+        'upload': ['get_client_contracts', 'upload_contract_document'],
         'show': ['get_contracts_by_client', 'get_client_details', 'get_contract_details'],
         'search': ['search_contracts', 'search_clients']
     }
@@ -1111,7 +1158,11 @@ def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
 
     # If tool is not in allowed list, correct it
     if allowed_tools and tool_name not in allowed_tools:
-        corrected_tool = allowed_tools[0]  # Use first allowed tool
+        # Special case: if agent calls delete_contract but should upload, correct it
+        if tool_name == "delete_contract" and current_workflow == "upload":
+            corrected_tool = "upload_contract_document"
+        else:
+            corrected_tool = allowed_tools[0]  # Use first allowed tool
         print(f"🔍 DEBUG: Tool corrected from {tool_name} to {corrected_tool}")
         return corrected_tool
      

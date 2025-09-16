@@ -93,7 +93,7 @@ class IntelligentRouter:
             # If no OpenAI client available, use fallback routing
             if self.client is None:
                 print("Using fallback routing (no OpenAI API key)")
-                return self.fallback_routing(user_message)
+                return self.fallback_routing(user_message, context)
             
             # Get enhanced context for routing decision
             context = await self.context_manager.get_enhanced_context(state, "router")
@@ -185,16 +185,16 @@ If the request is a simple greeting, use handle_greeting.
         except Exception as e:
             print(f"Error in LLM routing: {e}")
             # Fallback to simple keyword-based routing
-            return self.fallback_routing(user_message)
+            return self.fallback_routing(user_message, context)
     
-    def fallback_routing(self, user_message: str) -> Dict:
+    def fallback_routing(self, user_message: str, context: Dict = None) -> Dict:
         """
         ENHANCEMENT: Enhanced fallback routing using context-aware classification
         REVERT: Replace this method with the original keyword-based routing if issues occur
         """
         try:
             # Use enhanced routing logic for better classification
-            result = self.enhanced_router.classify_request(user_message)
+            result = self.enhanced_router.classify_request(user_message, context)
             
             # Convert enhanced routing result to expected format
             if result["agent_name"] == "greeting":
@@ -291,8 +291,9 @@ def master_router_node_sync(state: AgentState) -> Dict:
         if not user_message:
             return {"current_agent": "client_agent"}
         
-        # Use fallback routing for sync calls
-        routing_decision = intelligent_router.fallback_routing(user_message)
+        # Use fallback routing for sync calls with context
+        context = state.get('context', {})
+        routing_decision = intelligent_router.fallback_routing(user_message, context)
         
         function_name = routing_decision["function"]
         arguments = routing_decision["arguments"]
@@ -378,17 +379,23 @@ def router(state: AgentState) -> Dict:
     LangGraph will use this as the main router.
     """
     import asyncio
-    
+
+    print(f"🧠 Sync Router: Processing message routing...")
+    print(f"🔍 DEBUG: Router called with state keys: {list(state.keys()) if isinstance(state, dict) else 'Not a dict'}")
+
     try:
         # Try to get the current event loop
         loop = asyncio.get_event_loop()
         if loop.is_running():
             # We're in an async context, but LangGraph is calling us synchronously
             # Use the sync version
+            print("🔍 DEBUG: Using sync router version")
             return master_router_node_sync(state)
         else:
             # We can run async
+            print("🔍 DEBUG: Using async router version")
             return asyncio.run(master_router_node(state))
     except RuntimeError:
         # No event loop, use sync version
+        print("🔍 DEBUG: No event loop, using sync version")
         return master_router_node_sync(state)
