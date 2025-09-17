@@ -279,7 +279,7 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                     amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
                     status = c.status.lower()
                     start_date = str(c.start_date) if c.start_date else "Not set"
-                    contract_info = f"{i}. Contract ID {c.contract_id}: {c.contract_type} ({amount}) - {status}, start date ({start_date})"
+                    contract_info = f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})"
                     contract_list.append(contract_info)
                 
                 
@@ -1477,12 +1477,16 @@ async def delete_contract_document_tool(params: DeleteContractDocumentParams) ->
                 # If multiple contracts, ask user to specify which one
                 if len(contracts) > 1:
                     contract_list = []
-                    for c in contracts:
-                        contract_list.append(f"- Contract ID {c.contract_id}: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
+                    for i, c in enumerate(contracts, 1):
+                        amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
+                        status = c.status.lower()
+                        start_date = str(c.start_date) if c.start_date else "Not set"
+                        contract_info = f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})"
+                        contract_list.append(contract_info)
                     
                     return ContractToolResult(
                         success=False,
-                        message=f"❌ Client '{client.client_name}' has {len(contracts)} contracts. Please specify which contract ID you want to delete the document for:\n\n" + "\n".join(contract_list) + "\n\nUse: 'delete contract document for [client] contract [ID]'"
+                        message=f"🔍 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + "\n\nPlease specify which contract ID you want to delete the document for (e.g., 'delete contract document for {client.client_name} contract {contracts[0].contract_id}')"
                     )
             
             # Delete documents
@@ -1633,8 +1637,12 @@ async def delete_contract_tool(params: DeleteContractParams, context: Optional[D
                     else:
                         # Ask user to specify which one or use "all"
                         contract_list = []
-                        for c in contracts:
-                            contract_list.append(f"- Contract ID {c.contract_id}: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
+                        for i, c in enumerate(contracts, 1):
+                            amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
+                            status = c.status.lower()
+                            start_date = str(c.start_date) if c.start_date else "Not set"
+                            contract_info = f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})"
+                            contract_list.append(contract_info)
                         
                         # Store current client in context
                         # CRITICAL FIX: Ensure all values are hashable/serializable to prevent unhashable type errors
@@ -1643,7 +1651,7 @@ async def delete_contract_tool(params: DeleteContractParams, context: Optional[D
                         
                         return ContractToolResult(
                             success=False,
-                            message=f"❌ Client '{client.client_name}' has {len(contracts)} contracts. Please specify which contract ID you want to delete:\n\n" + "\n".join(contract_list) + "\n\nUse: 'delete contract for [client] contract [ID]' or 'delete all contracts for [client]'"
+                            message=f"🔍 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + "\n\nPlease specify which contract ID you want to delete (e.g., 'delete contract for {client.client_name} contract {contracts[0].contract_id}') or 'delete all contracts for {client.client_name}'"
                         )
             
             # Delete contract(s) and their documents

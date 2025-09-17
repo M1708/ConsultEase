@@ -167,13 +167,16 @@ class EnhancedRoutingLogic:
         Returns:
             Dict containing agent_name, confidence, reasoning, and operation_type
         """
+        print(f"🔍 ENHANCED ROUTING: classify_request called with user_message='{user_message}', context={context}")
         message_lower = user_message.lower()
 
         # Step 1: Identify operation type
         operation_type = self._identify_operation_type(message_lower)
+        print(f"🔍 ENHANCED ROUTING: operation_type='{operation_type}'")
 
         # Step 2: Check for contract ID responses (special case)
         if self._is_contract_id_response(user_message, context):
+            print(f"🔍 ENHANCED ROUTING: Contract ID response detected, routing to contract_agent")
             return {
                 "agent_name": "contract_agent",
                 "confidence": "high",
@@ -181,6 +184,7 @@ class EnhancedRoutingLogic:
                 "operation_type": "contract_response",
                 "scores": {"contract_agent": 10.0, "client_agent": 0.0, "employee_agent": 0.0}
             }
+        
 
         # Step 3: Score each agent based on keyword matches
         agent_scores = self._calculate_agent_scores(user_message, message_lower)
@@ -309,6 +313,7 @@ class EnhancedRoutingLogic:
         false_positives = ["New York", "Los Angeles", "San Francisco", "United States"]
         return [name for name in matches if name not in false_positives]
     
+    
     def _has_multi_entity_context(self, message_lower: str, original_message: str) -> bool:
         """Check if the message involves multiple entities (client + contract)."""
         # Look for patterns that suggest both client and contract creation
@@ -366,23 +371,54 @@ class EnhancedRoutingLogic:
 
     def _is_contract_id_response(self, user_message: str, context: Dict[str, Any] = None) -> bool:
         """Check if the user message is a contract ID response that should be routed to contract agent."""
+        print(f"🔍 CONTRACT ID CHECK: user_message='{user_message}', context={context}")
+        
         # Check if message is just a number (potential contract ID)
         if not user_message.strip().isdigit():
+            print(f"🔍 CONTRACT ID CHECK: Not a digit, returning False")
             return False
 
         # If we have context indicating a pending contract operation, route to contract agent
         if context:
+            context_str = str(context)
+            print(f"🔍 CONTRACT ID CHECK: Context available, checking for contract operations")
+            
             # Check for file upload context (indicates document upload operation)
-            if context.get('file_info') or 'file_info' in str(context):
+            if isinstance(context, dict):
+                if context.get('file_info') or 'file_info' in context_str:
+                    print(f"🔍 CONTRACT ID CHECK: File info found, returning True")
+                    return True
+
+                # Check for pending contract operations
+                user_operation = context.get('user_operation', '')
+                print(f"🔍 CONTRACT ID CHECK: user_operation='{user_operation}'")
+                if any(op in user_operation.lower() for op in ['contract', 'upload', 'document']):
+                    print(f"🔍 CONTRACT ID CHECK: Contract operation found, returning True")
+                    return True
+
+                # Check for contract-related context
+                if context.get('current_contract_id') or 'contract' in context_str.lower():
+                    print(f"🔍 CONTRACT ID CHECK: Contract context found, returning True")
+                    return True
+            else:
+                # Handle string context
+                if 'file_info' in context_str:
+                    print(f"🔍 CONTRACT ID CHECK: File info in string context, returning True")
+                    return True
+                
+                if 'contract' in context_str.lower():
+                    print(f"🔍 CONTRACT ID CHECK: Contract in string context, returning True")
+                    return True
+            
+            # Check for operation state in string context
+            if 'Current operation: update_contract' in context_str:
                 return True
 
-            # Check for pending contract operations
-            user_operation = context.get('user_operation', '')
+        # Also check state data for contract operations
+        if context and 'data' in context:
+            state_data = context['data']
+            user_operation = state_data.get('user_operation', '')
             if any(op in user_operation.lower() for op in ['contract', 'upload', 'document']):
-                return True
-
-            # Check for contract-related context
-            if context.get('current_contract_id') or 'contract' in str(context).lower():
                 return True
 
         return False

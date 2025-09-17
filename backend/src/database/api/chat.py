@@ -554,7 +554,7 @@ async def send_chat_message_with_file(
                 
                 # Update context
                 existing_state["context"]["last_interaction"] = datetime.now().isoformat()
-                existing_state["context"]["interaction_count"] += 1
+                existing_state["context"]["interaction_count"] = existing_state["context"].get("interaction_count", 0) + 1
                 existing_state["status"] = "processing"
                 
                 initial_state = existing_state
@@ -857,7 +857,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 
                 # Update context
                 existing_state["context"]["last_interaction"] = datetime.now().isoformat()
-                existing_state["context"]["interaction_count"] += 1
+                existing_state["context"]["interaction_count"] = existing_state["context"].get("interaction_count", 0) + 1
                 existing_state["status"] = "processing"
                 
                 # Add database to context
@@ -937,7 +937,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                     "context": {
                         "user_id": user_id,
                         "session_id": session_id,
-                        "user_name": current_user.user_full_name or current_user.user.email,
+                        "user_name": f"{current_user.user.first_name} {current_user.user.last_name}".strip() or current_user.user.email,
                         "user_role": current_user.role,
                         "conversation_start": datetime.now().isoformat(),
                         "last_interaction": datetime.now().isoformat(),
@@ -978,7 +978,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                         "context": {
                             "user_id": user_id,
                             "session_id": session_id,
-                            "user_name": current_user.user_full_name or current_user.user.email,
+                            "user_name": f"{current_user.user.first_name} {current_user.user.last_name}".strip() or current_user.user.email,
                             "user_role": current_user.role,
                             "conversation_start": datetime.now().isoformat(),
                             "last_interaction": datetime.now().isoformat(),

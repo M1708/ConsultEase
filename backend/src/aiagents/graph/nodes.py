@@ -67,10 +67,6 @@ class EnhancedAgentNodeExecutor:
         execution_context: Optional[Dict[str, Any]] = None
     ) -> Dict:
         """Phase 2 Enhanced invocation with dynamic prompts and intelligent caching."""
-        print(f"🔍 DEBUG: Agent invoke called - state['data'] = {state.get('data', {})}")
-        print(f"🔍 DEBUG: Agent invoke called - user_operation = {state.get('data', {}).get('user_operation', 'NOT_FOUND')}")
-        print(f"🔍 DEBUG: Agent invoke called - agent_name = {agent_name}")
-        print(f"🔍 DEBUG: Agent invoke called - state messages count = {len(state.get('messages', []))}")
         """
         Phase 2 Enhanced invocation with dynamic prompts and intelligent caching.
 
@@ -100,31 +96,15 @@ class EnhancedAgentNodeExecutor:
             system_prompt = await self._get_dynamic_instructions(
                 agent_name, state, execution_context
             )
-
-            # DEBUG: Show system prompt length (removed full prompt to reduce clutter)
-            print(f"🔍 DEBUG: System prompt length for {agent_name}: {len(system_prompt)} characters")
+            
 
             print(f"🚀 Invoking {agent_name} with Phase 2 dynamic context...")
-            print(f"🔍 DEBUG: Message count: {len(state.get('messages', []))}")
-            last_msg = state.get('messages', [])[-1] if state.get('messages') else None
-            if last_msg:
-                if hasattr(last_msg, 'content'):
-                    print(f"🔍 DEBUG: Last message: {last_msg.content}")
-                elif isinstance(last_msg, dict):
-                    print(f"🔍 DEBUG: Last message: {last_msg.get('content', str(last_msg))}")
-                else:
-                    print(f"🔍 DEBUG: Last message: {str(last_msg)}")
-            else:
-                print(f"🔍 DEBUG: Last message: No messages")
-            print(f"🔍 DEBUG: Context keys: {list(state.get('context', {}).keys()) if state.get('context') else 'No context'}")
 
             # Prepare messages with optimized structure
             prepared_messages = await self._prepare_messages_optimized(
                 state, system_prompt
             )
 
-            # DEBUG: Show message count being sent to LLM (removed full messages to reduce clutter)
-            print(f"🔍 DEBUG: Messages being sent to LLM: {len(prepared_messages)} messages")
 
 
             # Always extract context from user messages to preserve conversation context
@@ -137,12 +117,8 @@ class EnhancedAgentNodeExecutor:
                 await self._lookup_contract_and_save_client_name(state)
 
             # SHORT-CIRCUIT: If we have all context needed, bypass LLM and call tool directly
-            print(f"🔍 DEBUG: Checking short-circuit conditions after context extraction")
             if await self._should_short_circuit(state, agent_name):
-                print(f"🔍 DEBUG: Short-circuiting LLM call - direct tool execution")
                 return await self._execute_direct_tool_call(state, agent_name)
-            else:
-                print(f"🔍 DEBUG: Proceeding with LLM call")
 
             # Execute with performance monitoring
             response = await self._execute_with_monitoring(

@@ -135,6 +135,7 @@ ROUTING REASONING GUIDELINES:
   * If the name appears to be a company (Corp, Inc, LLC, etc.), think about whether they're asking for client information
   * Consider the conversation context and what type of information would be most relevant
 
+
 - Use your reasoning to determine the most appropriate agent based on the user's likely intent
 - When in doubt, consider what type of information the user is most likely seeking
 
@@ -292,8 +293,11 @@ def master_router_node_sync(state: AgentState) -> Dict:
             return {"current_agent": "client_agent"}
         
         # Use fallback routing for sync calls with context
+        # Combine both context and data for enhanced routing logic
         context = state.get('context', {})
-        routing_decision = intelligent_router.fallback_routing(user_message, context)
+        data = state.get('data', {})
+        combined_context = {**context, **data}
+        routing_decision = intelligent_router.fallback_routing(user_message, combined_context)
         
         function_name = routing_decision["function"]
         arguments = routing_decision["arguments"]

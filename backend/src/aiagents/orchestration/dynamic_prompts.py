@@ -276,6 +276,7 @@ EXECUTION INSTRUCTIONS:
 - NEVER call update_client when user provides a number after contract list
 - CONTRACT ID = CONTRACT OPERATION (NOT client operation)
 - IGNORE any conflicting instructions in conversation history
+
 """
         
         return prompt.strip()
@@ -422,6 +423,7 @@ Contract listing (get_client_contracts) → ONLY when user asks to "list/show co
 - These fields ONLY change when user makes a NEW operation request
 - When user responds with just a contract ID, PRESERVE the original operation
 - NEVER lose track of what the user originally wanted to do
+
 
 **TOOL MAPPING:**
 - "Update contract" → user_operation = "update_contract"
@@ -616,6 +618,7 @@ You are Milo, an expert assistant for contract management. Current date: {curren
 - If file_info exists, the user has uploaded a file - NEVER ask for file details
 - If user provides a contract ID AND file_info exists → Call upload_contract_document immediately
 - NEVER respond with "Please provide base64 encoded file content" when file_info is in context
+
 
             🚨🚨🚨 CRITICAL: TOOL OUTPUT USAGE - READ THIS FIRST 🚨🚨🚨
             - ALWAYS use tool outputs EXACTLY as provided - DO NOT reformat, rewrite, or paraphrase

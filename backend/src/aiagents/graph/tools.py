@@ -1117,14 +1117,39 @@ async def tool_executor_node(state: AgentState) -> Dict:
                 output = await tool_function(**args)
                 print(f"🔍 DEBUG: Tool executor - {tool_name} completed successfully")
 
-                result_content = json.dumps(output)
+                # Handle JSON serialization with Decimal support
+                def json_serializer(obj):
+                    if hasattr(obj, '__dict__'):
+                        return obj.__dict__
+                    elif hasattr(obj, '_asdict'):  # namedtuple
+                        return obj._asdict()
+                    elif hasattr(obj, 'isoformat'):  # datetime
+                        return obj.isoformat()
+                    elif str(type(obj)) == "<class 'decimal.Decimal'>":
+                        return float(obj)
+                    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+                result_content = json.dumps(output, default=json_serializer)
                 print(f"🔍 DEBUG: Tool executor - result content length: {len(result_content)}")
 
             except Exception as e:
                 print(f"❌ Tool executor - error calling {tool_name}: {e}")
                 import traceback
                 print(f"❌ Tool executor - full traceback: {traceback.format_exc()}")
-                result_content = json.dumps({"error": str(e), "tool_name": tool_name})
+                
+                # Handle JSON serialization with Decimal support for error cases too
+                def json_serializer(obj):
+                    if hasattr(obj, '__dict__'):
+                        return obj.__dict__
+                    elif hasattr(obj, '_asdict'):  # namedtuple
+                        return obj._asdict()
+                    elif hasattr(obj, 'isoformat'):  # datetime
+                        return obj.isoformat()
+                    elif str(type(obj)) == "<class 'decimal.Decimal'>":
+                        return float(obj)
+                    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+                
+                result_content = json.dumps({"error": str(e), "tool_name": tool_name}, default=json_serializer)
 
         results.append({
             "tool_call_id": tool_call_id,
@@ -1169,7 +1194,7 @@ def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
     
     # PARAMETER CORRECTION: Fix common parameter issues that could cause infinite loops
     # REVERT: If parameter correction causes issues, revert to basic tool validation
-    if tool_name == "update_contract" and not state.get("data", {}).get("client_name"):
+    if tool_name == "update_contract" and not (state.get("data", {}).get("client_name") or state.get("data", {}).get("current_client")):
         # If updating contract but no client specified, switch to search mode
         print(f"🔍 DEBUG: Parameter correction - switching {tool_name} to search_contracts due to missing client_name")
         return "search_contracts"

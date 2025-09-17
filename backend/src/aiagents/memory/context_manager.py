@@ -30,6 +30,7 @@ class ContextManager:
         user_context = f"User: {state['context']['user_name']} ({state['context']['user_role']})"
         context_parts.append(user_context)
         
+        
         # Add conversation summary
         if state['memory']['context_summary']:
             context_parts.append(f"Context: {state['memory']['context_summary']}")
