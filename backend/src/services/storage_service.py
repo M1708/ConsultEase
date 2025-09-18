@@ -384,24 +384,15 @@ class SupabaseStorageService:
         """Get signed URL for contract document access"""
         try:
             bucket_name = "contract-documents"
-            print(f"🔗 STORAGE DEBUG: Creating signed URL for file_path: {file_path}")
-            print(f"🔗 STORAGE DEBUG: Using bucket: {bucket_name}")
             
             response = self.supabase.storage.from_(bucket_name).create_signed_url(
                 path=file_path,
                 expires_in=expires_in
             )
             
-            print(f"🔗 STORAGE DEBUG: Supabase response: {response}")
-            print(f"🔗 STORAGE DEBUG: Response type: {type(response)}")
-            
             if response and hasattr(response, 'get'):
-                signed_url = response.get('signedURL', '')
-                print(f"🔗 STORAGE DEBUG: Extracted signedURL: {signed_url}")
-                return signed_url
+                return response.get('signedURL', '')
             else:
-                print(f"🔗 STORAGE DEBUG: No valid response, returning empty string")
                 return ''
         except Exception as e:
-            print(f"🔗 STORAGE DEBUG: Exception in get_contract_document_url: {str(e)}")
             return ''

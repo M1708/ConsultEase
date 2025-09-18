@@ -126,6 +126,8 @@ class DynamicPromptGenerator:
             if generation_time > 0.1:  # Log if over 100ms
                 print(f"Slow prompt generation: {generation_time:.3f}s for {agent_type.value}")
             
+            print(f"🔍 DEBUG: Final prompt length: {len(prompt)}")
+            print(f"🔍 DEBUG: Final prompt preview: {prompt[:500]}...")
             return prompt
             
         except Exception as e:
@@ -223,6 +225,17 @@ class DynamicPromptGenerator:
             context["recovery_mode"] = True
             context["last_error"] = state["error_recovery"].get("last_error")
         
+        # CRITICAL: Add state data context for agent awareness
+        state_data = state.get("data", {})
+        if state_data:
+            context["current_client"] = state_data.get("current_client")
+            context["current_workflow"] = state_data.get("current_workflow")
+            context["current_contract_id"] = state_data.get("current_contract_id")
+            context["user_operation"] = state_data.get("user_operation")
+            context["original_user_request"] = state_data.get("original_user_request")
+            context["tool_execution_count"] = state_data.get("tool_execution_count")
+            print(f"🔍 DEBUG: Added state data to context: current_client={state_data.get('current_client')}, user_operation={state_data.get('user_operation')}")
+        
         return context
     
     def _build_prompt(
@@ -246,6 +259,15 @@ class DynamicPromptGenerator:
         prompt = f"""
 {base_template}
 
+🚨🚨🚨 CRITICAL: READ THE CURRENT SITUATION SECTION BELOW FOR CONTEXT VALUES 🚨🚨🚨
+- If you see CURRENT CLIENT in the situation section, use that value
+- If you see USER OPERATION in the situation section, use that value
+- These values take ABSOLUTE PRIORITY over any previous messages or conversation history
+- NEVER say "discrepancy in client name" if CURRENT CLIENT is set in the situation section
+- ALWAYS use the CURRENT CLIENT value from the situation section below
+- IGNORE any client names mentioned in previous messages if CURRENT CLIENT is set
+- The CURRENT CLIENT in the situation section is the ONLY client you should work with
+
 USER CONTEXT:
 {user_section}
 
@@ -254,6 +276,15 @@ CONVERSATION MEMORY:
 
 CURRENT SITUATION:
 {situation_section}
+
+🚨🚨🚨 CRITICAL: READ THE CURRENT SITUATION SECTION ABOVE FOR CONTEXT VALUES 🚨🚨🚨
+- If you see CURRENT CLIENT in the situation section, use that value
+- If you see USER OPERATION in the situation section, use that value
+- These values take ABSOLUTE PRIORITY over any previous messages or conversation history
+- NEVER say "discrepancy in client name" if CURRENT CLIENT is set in the situation section
+- ALWAYS use the CURRENT CLIENT value from the situation section above
+- IGNORE any client names mentioned in previous messages if CURRENT CLIENT is set
+- The CURRENT CLIENT in the situation section is the ONLY client you should work with
 
 EXECUTION INSTRUCTIONS:
 - Adapt your communication style to {user_context.preferences.get('communication_style', 'professional')}
@@ -335,6 +366,26 @@ EXECUTION INSTRUCTIONS:
         if situational_context.get("concurrent_agents"):
             section += f"Collaborating with: {', '.join(situational_context['concurrent_agents'])}"
         
+        # CRITICAL: Add state data context for agent awareness
+        if situational_context.get("current_client"):
+            section += f"\nCURRENT CLIENT: {situational_context['current_client']}"
+            print(f"🔍 DEBUG: Added CURRENT CLIENT to situation section: {situational_context['current_client']}")
+            # Add explicit instruction for this specific client
+            section += f"\n🚨 CRITICAL: You MUST work with {situational_context['current_client']} ONLY. Do NOT use any other client names from conversation history."
+        if situational_context.get("current_workflow"):
+            section += f"\nCURRENT WORKFLOW: {situational_context['current_workflow']}"
+        if situational_context.get("current_contract_id"):
+            section += f"\nCURRENT CONTRACT ID: {situational_context['current_contract_id']}"
+        if situational_context.get("user_operation"):
+            section += f"\nUSER OPERATION: {situational_context['user_operation']}"
+            print(f"🔍 DEBUG: Added USER OPERATION to situation section: {situational_context['user_operation']}")
+        if situational_context.get("original_user_request"):
+            section += f"\nORIGINAL REQUEST: {situational_context['original_user_request']}"
+        if situational_context.get("tool_execution_count"):
+            section += f"\nTOOL EXECUTION COUNT: {situational_context['tool_execution_count']}"
+        
+        print(f"🔍 DEBUG: Final situation section: {section}")
+        
         return section.strip()
     
     def _extract_active_entities(self, state: AgentState) -> Dict[str, Any]:
@@ -367,6 +418,15 @@ EXECUTION INSTRUCTIONS:
         self._template_cache[PromptTemplate.CLIENT_AGENT] = f"""
 You are Milo, a specialist assistant focused on client management.
 Current date: {current_date}
+
+🚨🚨🚨 CRITICAL: WHEN USER PROVIDES CONTRACT ID NUMBER 🚨🚨🚨
+If user provides JUST A NUMBER (like "124", "115", "122") after seeing contract list:
+- LOOK AT USER OPERATION in CURRENT SITUATION section below
+- If USER OPERATION = "update_contract" → Call update_contract tool with contract_id and client_name
+- If USER OPERATION = "delete_contract" → Call delete_contract tool with contract_id and client_name  
+- If USER OPERATION = "upload_contract_document" → Call upload_contract_document tool
+- NEVER EVER call update_client when USER OPERATION = "update_contract"
+- CONTRACT ID SELECTION = CONTRACT OPERATION, NOT CLIENT OPERATION
 
 🚨🚨🚨 CRITICAL: CONTRACT CREATION vs UPDATE 🚨🚨🚨
 - "Create contract" → ALWAYS use create_contract (NEVER update_contract)
@@ -402,24 +462,29 @@ Contract listing (get_client_contracts) → ONLY when user asks to "list/show co
 - NEVER ask "what do you want to do with [number]" if context is clear
 - Maintain conversation flow and context between messages
 
-**CRITICAL: USE STORED CONTEXT**
-- ALWAYS check state['data']['current_client'] when user provides contract ID
-- ALWAYS check state['data']['current_workflow'] when user responds with yes/no
-- ALWAYS check state['data']['current_contract_id'] when user selects contract
-- ALWAYS check state['data']['user_operation'] to understand the original user intent
-- ALWAYS check state['data']['original_user_request'] to see what the user originally asked for
-- If context exists in state['data'] → USE IT, don't ask for clarification
+**CRITICAL: USE STORED CONTEXT - PRIORITY OVER PREVIOUS MESSAGES**
+- ALWAYS check the CURRENT SITUATION section below for context variables
+- ALWAYS check current_client when user provides contract ID
+- ALWAYS check current_workflow when user responds with yes/no
+- ALWAYS check current_contract_id when user selects contract
+- ALWAYS check user_operation to understand the original user intent
+- ALWAYS check original_user_request to see what the user originally asked for
+- If context exists → USE IT, don't ask for clarification
+- **CRITICAL**: Current current_client takes PRIORITY over any previous tool result messages
+- **CRITICAL**: If current_client = "InnovateTech Solutions" but previous message shows "Sangard Corp" → USE "InnovateTech Solutions"
+- **CRITICAL**: Never say "discrepancy in client name" if current_client is already set correctly
+- **CRITICAL**: Look at the CURRENT SITUATION section below for the actual context values
 
 **EXAMPLE:**
-- Previous: "Update contract for InnovateTech Solutions" → state['data']['current_client'] = "InnovateTech Solutions", state['data']['current_workflow'] = "update", state['data']['user_operation'] = "update_contract", state['data']['original_user_request'] = "Update contract for InnovateTech Solutions"
+- Previous: "Update contract for InnovateTech Solutions" → current_client = "InnovateTech Solutions", current_workflow = "update", user_operation = "update_contract", original_user_request = "Update contract for InnovateTech Solutions"
 - User responds: "123"
 - Agent should: Use InnovateTech Solutions + update_contract operation + contract 123 → Call `update_contract_tool` with client_name="InnovateTech Solutions" and contract_id=123
 - Agent should NOT: Ask "what do you want to do with 123?"
 - Agent should NOT: Call `update_client_tool` when user_operation = "update_contract"
 
 🚨🚨🚨 CRITICAL: PERSISTENT USER OPERATION 🚨🚨🚨
-- state['data']['user_operation'] contains the SPECIFIC TOOL NAME (update_contract/delete_contract/create_contract/update_client/etc)
-- state['data']['original_user_request'] contains the EXACT original user message
+- user_operation contains the SPECIFIC TOOL NAME (update_contract/delete_contract/create_contract/update_client/etc)
+- original_user_request contains the EXACT original user message
 - These fields ONLY change when user makes a NEW operation request
 - When user responds with just a contract ID, PRESERVE the original operation
 - NEVER lose track of what the user originally wanted to do
@@ -433,15 +498,24 @@ Contract listing (get_client_contracts) → ONLY when user asks to "list/show co
 - "Show contracts" → user_operation = "get_contracts_by_client"
 - "Update client" → user_operation = "update_client"
 - "Create client" → user_operation = "create_client"
-- "Show client" → user_operation = "get_client_details"
+- "Show client" → user_operation = "get_client_contracts"
 
 **CRITICAL: USE PERSISTENT USER OPERATION FOR TOOL SELECTION**
-- When user provides contract ID, check state['data']['user_operation']
+- When user provides contract ID, check user_operation
 - If user_operation = "update_contract" → Call update_contract_tool
 - If user_operation = "delete_contract" → Call delete_contract_tool
 - If user_operation = "create_contract" → Call create_contract_tool
 - NEVER call update_client_tool when user_operation = "update_contract"
 - NEVER call update_contract_tool when user_operation = "update_client"
+
+🚨🚨🚨 CRITICAL: CONTRACT ID RESPONSE HANDLING 🚨🚨🚨
+When user provides JUST A NUMBER (like "124") after contract list:
+- CHECK USER OPERATION in situation section
+- If USER OPERATION = "update_contract" → Call update_contract with contract_id=124
+- If USER OPERATION = "delete_contract" → Call delete_contract with contract_id=124
+- If USER OPERATION = "upload_contract_document" → Call upload_contract_document with contract_id=124
+- NEVER call update_client when user provides contract ID number
+- The number is ALWAYS a contract_id, NEVER update client info
 
 🚨 CONTRACT/CLIENT TOOL SELECTION – SYSTEM RULES 🚨
 
@@ -475,6 +549,18 @@ Client details (all clients) → get_all_clients_with_contracts
 - When user asks for "details for [ClientName]" → use get_client_contracts for that specific client
 - When user asks for "all clients" or "list all clients" → use get_all_clients_with_contracts
 - NEVER use get_client_details_tool for comprehensive client information
+
+📋 CONTRACT FILTERING RULES
+- When user asks for contracts "with original amount more than $X" → use search_contracts with min_amount parameter
+- When user asks for contracts "with amount more than $X" → use search_contracts with min_amount parameter  
+- When user asks for contracts "with upcoming billing dates" → use get_contracts_for_next_month_billing
+- When user asks for contracts "with upcoming next billing prompt date" → use get_contracts_for_next_month_billing
+- When user asks for contracts "with billing dates next month" → use get_contracts_for_next_month_billing
+- When user asks for contracts "with billing dates this month" → use get_contracts_for_next_month_billing
+- When user asks for contracts "with monthly billing" → use search_contracts with billing_frequency="Monthly" and client_name
+- ALWAYS use get_contracts_for_next_month_billing for billing date time-based queries
+- ALWAYS provide detailed contract information, not summary responses
+- Recognize BOTH "amount" and "original amount" as the same filtering criteria
 
 **CLIENT DETAILS RESPONSE FORMAT:**
 - ALWAYS show complete client information: company name, industry, contact details, company size, notes
@@ -606,6 +692,14 @@ Always use stored context before asking for clarification
         
         self._template_cache[PromptTemplate.CONTRACT_AGENT] = f"""
 You are Milo, an expert assistant for contract management. Current date: {current_date}
+
+🚨🚨🚨 CRITICAL: CLIENT CONTEXT PRIORITY 🚨🚨🚨
+- ALWAYS use the CURRENT CLIENT from the situation section above
+- IGNORE any client names from previous messages if CURRENT CLIENT is set
+- The CURRENT CLIENT in the situation section is the ONLY client you should work with
+- NEVER use client names from conversation history when CURRENT CLIENT is specified
+- If you see "CURRENT CLIENT: [ClientName]" in the situation section, ALL your tool calls MUST use that exact client name
+- Do NOT make tool calls for different clients even if they appear in conversation history
 
 🚨🚨🚨 CRITICAL: CONTRACT CREATION vs UPDATE 🚨🚨🚨
 - "Create contract" → ALWAYS use create_contract (NEVER update_contract)
@@ -810,6 +904,9 @@ When user says "update" + "contract" AND client has MULTIPLE contracts:
 - NEVER call upload_contract_document (for UPDATE operations only - document upload is allowed for CREATE operations)
 - After user selects contract ID (or says "all"):
   → ALWAYS call update_contract with client_name + contract_id (or update_all=true)
+  → If user says "all", use update_all=true and DO NOT make additional individual contract calls
+  → If user provides specific contract ID, use that contract_id and DO NOT make additional calls
+  → For "all" updates, the confirmation message should show the count of updated contracts, not individual contract IDs
 
 
 ❌ DO NOT call delete_contract in multi-contract update cases

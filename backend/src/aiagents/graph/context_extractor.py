@@ -14,9 +14,10 @@ class ContextExtractor:
     def __init__(self):
         self.client_patterns = [
             r"client['\"]?\s*:\s*['\"]?([^'\",\n]+)['\"]?",
-            r"for\s+client\s+['\"]?([^'\",\n]+)['\"]?",
+            r"for\s+client\s+['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?=\s+(?:with|that|where|having)\b|\s*$)['\"]?",
             r"client\s+['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)['\"]?",
-            r"for\s+([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)",
+            r"contract\s+with\s+([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)",
+            r"for\s+([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?:\s|$)",
             r"['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)['\"]?"
         ]
 
@@ -52,17 +53,24 @@ class ContextExtractor:
         """Extract context from user message."""
         context = {}
 
-        # Extract contract ID first
-        contract_id = self._extract_contract_id(user_message)
-        if contract_id:
-            context['current_contract_id'] = contract_id
+        # Extract client name first to check for client switching
+        client_name = self._extract_client_name(user_message)
+        if client_name:
+            context['current_client'] = client_name
+            print(f"🔍 DEBUG: Extracted client name: {client_name}")
+            
+            # Check if client is switching - if so, clear contract ID from previous client
+            if existing_state and 'current_client' in existing_state:
+                previous_client = existing_state.get('current_client', '')
+                if previous_client and previous_client.lower() != client_name.lower():
+                    print(f"🔍 DEBUG: Client switching from '{previous_client}' to '{client_name}' - clearing contract ID")
+                    context['current_contract_id'] = None  # Clear contract ID when switching clients
 
-        # Only extract client name if we don't have a contract ID
-        # If we have a contract ID, let the agent determine the client name by looking up the contract
-        if not contract_id:
-            client_name = self._extract_client_name(user_message)
-            if client_name:
-                context['current_client'] = client_name
+        # Extract contract ID only if no client switching occurred
+        if not client_name or (existing_state and existing_state.get('current_client', '').lower() == client_name.lower()):
+            contract_id = self._extract_contract_id(user_message)
+            if contract_id:
+                context['current_contract_id'] = contract_id
 
         # Extract workflow/operation
         workflow = self._extract_workflow(user_message)
@@ -116,16 +124,20 @@ class ContextExtractor:
     
     def _extract_client_name(self, text: str) -> Optional[str]:
         """Extract client name from text."""
+        print(f"🔍 DEBUG: _extract_client_name called with text: '{text}'")
         for i, pattern in enumerate(self.client_patterns):
+            print(f"🔍 DEBUG: Trying pattern {i}: {pattern}")
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 client_name = match.group(1).strip()
+                print(f"🔍 DEBUG: Pattern {i} matched: '{client_name}'")
 
                 # Check exclude patterns first
                 should_exclude = False
                 for exclude_pattern in self.client_exclude_patterns:
                     if re.search(exclude_pattern, client_name, re.IGNORECASE):
                         should_exclude = True
+                        print(f"🔍 DEBUG: Excluded by pattern: {exclude_pattern}")
                         break
 
                 if should_exclude:
@@ -136,7 +148,7 @@ class ContextExtractor:
                     and len(client_name) < 50  # Avoid overly long matches
                     and not client_name.lower().startswith(('update', 'delete', 'create', 'upload'))
                     and not client_name.lower().startswith(('the contract', 'contract with', 'contract id'))
-                    and 'contract' not in client_name.lower()):
+                    and not client_name.lower().startswith('contract')):
                     return client_name
         return None
     
@@ -150,10 +162,21 @@ class ContextExtractor:
     
     def _extract_contract_id(self, text: str) -> Optional[str]:
         """Extract contract ID from text."""
-        for pattern in self.contract_id_patterns:
+        print(f"🔍 DEBUG: Extracting contract ID from: '{text}'")
+        
+        # Skip extraction if the text contains "contract with [client]" pattern
+        # This prevents false matches like "contract with InnovateTech Solutions"
+        if re.search(r'contract\s+with\s+[a-zA-Z]', text, re.IGNORECASE):
+            print(f"🔍 DEBUG: Skipping contract ID extraction - detected 'contract with [client]' pattern")
+            return None
+        
+        for i, pattern in enumerate(self.contract_id_patterns):
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                extracted_id = match.group(1).strip()
+                print(f"🔍 DEBUG: Pattern {i} matched: '{pattern}' -> extracted: '{extracted_id}'")
+                return extracted_id
+        print(f"🔍 DEBUG: No contract ID patterns matched")
         return None
     
     def _is_new_operation_request(self, text: str) -> bool:
@@ -240,8 +263,14 @@ class ContextExtractor:
                 print(f"🔍 DEBUG: Updated original user request: {value}")
             else:
                 # For other context (client, contract_id, workflow), always update
-                state['data'][key] = value
-                print(f"🔍 DEBUG: Saved context {key} = {value}")
+                # Special handling for contract_id - if None, remove it from state
+                if key == 'current_contract_id' and value is None:
+                    if 'current_contract_id' in state['data']:
+                        del state['data']['current_contract_id']
+                        print(f"🔍 DEBUG: Cleared contract ID due to client switching")
+                else:
+                    state['data'][key] = value
+                    print(f"🔍 DEBUG: Saved context {key} = {value}")
         
         # Preserve existing user_operation if not provided in new context
         if 'user_operation' not in context and 'user_operation' in state['data']:

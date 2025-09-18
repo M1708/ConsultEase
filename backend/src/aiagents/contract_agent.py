@@ -220,7 +220,7 @@ class ContractAgent:
                 "type": "function",
                 "function": {
                     "name": "search_contracts",
-                    "description": "Search and filter contracts by various criteria such as billing frequency, contract type, status, client name, or amount range. Use this when user asks for contracts with specific characteristics like 'monthly billing', 'fixed contracts', 'active contracts', etc.",
+                    "description": "Search and filter contracts by various criteria such as billing frequency, contract type, status, client name, amount range, or billing dates. Use this when user asks for contracts with specific characteristics like 'upcoming billing dates', 'next billing prompt date', 'monthly billing', 'fixed contracts', 'active contracts', 'amount more than $X', etc. CRITICAL: Always use this tool when filtering is needed.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -246,10 +246,15 @@ class ContractAgent:
                 "type": "function",
                 "function": {
                     "name": "get_contracts_for_next_month_billing",
-                    "description": "Get contracts with billing prompt dates in the next month or later in the current month. Use this when user asks for 'contracts with billing dates next month', 'contracts due for billing next month', 'upcoming billing prompt date', 'contracts with upcoming billing', or similar requests.",
+                    "description": "Get contracts with billing prompt dates in the next month or later in the current month. Use this when user asks for 'contracts with billing dates next month', 'contracts due for billing next month', 'upcoming billing prompt date', 'contracts with upcoming billing', or similar requests. Can filter by specific client or return all contracts.",
                     "parameters": {
                         "type": "object",
-                        "properties": {},
+                        "properties": {
+                            "client_name": {
+                                "type": "string", 
+                                "description": "Optional. Filter contracts by specific client name. If not provided, returns all contracts with upcoming billing dates."
+                            }
+                        },
                         "required": []
                     }
                 }

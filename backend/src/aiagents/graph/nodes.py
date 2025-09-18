@@ -92,24 +92,27 @@ class EnhancedAgentNodeExecutor:
                 print(f"⚡ Cache hit for {agent_name}")
                 return cached_response
 
-            # Get dynamic, context-aware instructions
+            # Prepare messages with basic structure first (without system prompt)
+            prepared_messages = await self._prepare_messages_optimized(
+                state, ""  # Empty system prompt for now
+            )
+
+            # Always extract context from user messages to preserve conversation context
+            # This ensures the agent knows what operation to perform
+            # CRITICAL: This must happen BEFORE prompt generation so the agent sees the updated context
+            await self._extract_and_save_context(state, prepared_messages, None)
+
+            # Get dynamic, context-aware instructions AFTER context extraction
             system_prompt = await self._get_dynamic_instructions(
                 agent_name, state, execution_context
             )
             
-
-            print(f"🚀 Invoking {agent_name} with Phase 2 dynamic context...")
-
-            # Prepare messages with optimized structure
+            # Update prepared messages with the system prompt
             prepared_messages = await self._prepare_messages_optimized(
                 state, system_prompt
             )
 
-
-
-            # Always extract context from user messages to preserve conversation context
-            # This ensures the agent knows what operation to perform
-            await self._extract_and_save_context(state, prepared_messages, None)
+            print(f"🚀 Invoking {agent_name} with Phase 2 dynamic context...")
 
             # If we have a contract ID but no client name, look up the contract to get the client name
             if (state.get('data', {}).get('current_contract_id') and
@@ -709,6 +712,32 @@ class EnhancedAgentNodeExecutor:
 
         print(f"🔍 DEBUG: Short-circuit check - user_operation: {has_user_operation} ({user_operation}), client: {has_client}, contract_id: {has_contract_id}, file_info: {has_file_info}")
         print(f"🔍 DEBUG: Full state data: {data}")
+        if has_contract_id:
+            print(f"🔍 DEBUG: Contract ID being used for short-circuit: {data.get('current_contract_id')}")
+            print(f"🔍 DEBUG: Contract ID source - checking if it came from context extraction...")
+        
+        # Check if contract_id was extracted from the current message
+        messages = state.get('messages', [])
+        if messages:
+            last_message = messages[-1]
+            if isinstance(last_message, dict):
+                last_content = last_message.get('content', '').strip()
+            elif hasattr(last_message, 'content'):
+                last_content = last_message.content.strip()
+            else:
+                last_content = ''
+            print(f"🔍 DEBUG: Last message content: '{last_content}'")
+            
+            # Check if contract ID was extracted from this message
+            if has_contract_id:
+                from .context_extractor import ContextExtractor
+                extractor = ContextExtractor()
+                extracted_id = extractor._extract_contract_id(last_content)
+                print(f"🔍 DEBUG: Contract ID extracted from current message: {extracted_id}")
+                if extracted_id == data.get('current_contract_id'):
+                    print(f"🔍 DEBUG: Contract ID came from current message - this should NOT short-circuit")
+                else:
+                    print(f"🔍 DEBUG: Contract ID did NOT come from current message - might be from previous state")
 
         # Short-circuit for file uploads when file_info exists AND no contract_id is specified yet
         # This prevents short-circuiting during contract selection responses
@@ -726,12 +755,29 @@ class EnhancedAgentNodeExecutor:
             messages = state.get('messages', [])
             if messages:
                 last_message = messages[-1]
-                if hasattr(last_message, 'content'):
+                # Handle both dict and object message formats
+                if isinstance(last_message, dict):
+                    last_content = last_message.get('content', '').strip()
+                elif hasattr(last_message, 'content'):
                     last_content = last_message.content.strip()
-                    # Only short-circuit if the last message is just a contract ID (simple number)
-                    if last_content.isdigit():
-                        print(f"🔍 DEBUG: Short-circuiting LLM call - direct tool execution")
-                        return True
+                else:
+                    last_content = ''
+                
+                # Check if contract ID was extracted from the current message
+                from .context_extractor import ContextExtractor
+                extractor = ContextExtractor()
+                extracted_id = extractor._extract_contract_id(last_content)
+                
+                # Only short-circuit if:
+                # 1. The last message is just a contract ID (simple number)
+                # 2. AND the contract ID was NOT extracted from the current message (meaning it's from previous state)
+                # 3. AND this is a response to a contract list (not an initial request)
+                if last_content.isdigit() and extracted_id != data.get('current_contract_id') and len(messages) > 1:
+                    print(f"🔍 DEBUG: Short-circuiting LLM call - direct tool execution")
+                    return True
+                else:
+                    print(f"🔍 DEBUG: Not short-circuiting - contract ID came from current message or this is initial request")
+                    return False
 
         print(f"🔍 DEBUG: Short-circuit conditions NOT met - letting LLM handle the request")
         return False
@@ -786,6 +832,13 @@ class EnhancedAgentNodeExecutor:
                     contract_id=int(contract_id) if contract_id else None
                     # Note: Let LLM handle other field extraction for better flexibility
                 )
+                
+                # Create context with original request for field extraction
+                context = {
+                    'original_user_request': original_request,
+                    'current_client': client_name,
+                    'current_contract_id': contract_id
+                }
             elif user_operation == 'delete_contract':
                 from ..tools.contract_tools import DeleteContractParams
                 params = DeleteContractParams(
@@ -793,23 +846,40 @@ class EnhancedAgentNodeExecutor:
                     contract_id=int(contract_id) if contract_id else None
                 )
             elif user_operation == 'upload_contract_document':
-                # Handle upload operation with preserved context
+                # Handle upload operation with actual file data from context
                 from ..tools.contract_tools import UploadContractDocumentParams
+                
+                # Extract file info from context
+                context_info = state.get('context', {})
+                file_info = context_info.get('file_info', {})
+                
+                if not file_info:
+                    print(f"🔍 DEBUG: No file_info found in context for upload")
+                    return {"messages": [{"role": "assistant", "content": "❌ No file data found for upload. Please try uploading the file again."}]}
+                
+                print(f"🔍 DEBUG: File info extracted - filename: {file_info.get('filename')}, size: {file_info.get('file_size')}")
+                
                 params = UploadContractDocumentParams(
                     client_name=client_name,
                     contract_id=int(contract_id) if contract_id else None,
-                    file_data="<base64_encoded_data>",  # Placeholder - will be replaced by wrapper
-                    filename="[USE_ACTUAL_FILE_DATA_FROM_CONTEXT]",   # Placeholder - will be replaced by wrapper
-                    file_size=0,  # Placeholder - will be replaced by wrapper
-                    mime_type="[USE_ACTUAL_FILE_DATA_FROM_CONTEXT]"   # Placeholder - will be replaced by wrapper
+                    file_data=file_info.get('file_data', ''),
+                    filename=file_info.get('filename', 'unknown_file'),
+                    file_size=file_info.get('file_size', 0),
+                    mime_type=file_info.get('mime_type', 'application/octet-stream')
                 )
             else:
                 # For other operations, create basic params
                 params = {"client_name": client_name, "user_response": contract_id}
 
             # Call the tool directly
-            print(f"🔍 DEBUG: Calling {tool_name} with params: {params}")
-            result = await tool_function(params, state.get('context', {}))
+            if user_operation == 'upload_contract_document':
+                print(f"🔍 DEBUG: Calling {tool_name} with params: client_name='{params.client_name}' contract_id={params.contract_id} file_data='{params.file_data[:50]}...' filename='{params.filename}' file_size={params.file_size} mime_type='{params.mime_type}'")
+            else:
+                print(f"🔍 DEBUG: Calling {tool_name} with params: {params}")
+            if user_operation == 'update_contract':
+                result = await tool_function(params, context)
+            else:
+                result = await tool_function(params, state.get('context', {}))
 
             # Format the result as a message
             if hasattr(result, 'message'):

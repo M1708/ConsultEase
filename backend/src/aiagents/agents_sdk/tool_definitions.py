@@ -12,17 +12,31 @@ import re
 from datetime import datetime
 
 def _convert_date_format(date_str: str) -> str:
-    """Convert date from 'Feb 15th 2026' format to '2026-02-15' format"""
+    """Convert date from 'Feb 15th 2026' or 'March 15 2026' format to '2026-02-15' format"""
     try:
         # Remove ordinal suffixes (st, nd, rd, th)
         date_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_str)
         
-        # Parse the date
-        parsed_date = datetime.strptime(date_str.strip(), "%b %d %Y")
+        # Try different date formats
+        date_formats = [
+            "%b %d %Y",      # "Feb 15 2026"
+            "%B %d %Y",      # "March 15 2026"
+            "%m/%d/%Y",      # "03/15/2026"
+            "%m-%d-%Y",      # "03-15-2026"
+            "%Y-%m-%d"       # "2026-03-15" (already correct format)
+        ]
         
-        # Return in YYYY-MM-DD format
-        return parsed_date.strftime("%Y-%m-%d")
-    except ValueError:
+        for fmt in date_formats:
+            try:
+                parsed_date = datetime.strptime(date_str.strip(), fmt)
+                # Return in YYYY-MM-DD format
+                return parsed_date.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        
+        # If all formats fail, return the original string
+        return date_str
+    except Exception:
         # If parsing fails, return the original string
         return date_str
 

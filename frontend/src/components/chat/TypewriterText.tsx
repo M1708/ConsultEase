@@ -31,7 +31,7 @@ const preprocessUrlsForTypewriter = (text: string): string => {
 
 // Function to preprocess URLs for final Markdown rendering
 const preprocessUrlsForMarkdown = (text: string): string => {
-  // Don't process text that already contains markdown links
+  // Don't process text that already contains markdown links - return as is
   if (text.includes('[') && text.includes('](')) {
     return text;
   }
@@ -53,21 +53,6 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
   style,
   enableMarkdown = true // Default to true for Markdown support
 }) => {
-  // Debug logging for markdown processing
-  if (enableMarkdown) {
-    console.log("🔗 FRONTEND DEBUG: TypewriterText received text:", text);
-    console.log("🔗 FRONTEND DEBUG: Text length:", text.length);
-    console.log("🔗 FRONTEND DEBUG: Contains markdown link:", text.includes('[') && text.includes(']('));
-    if (text.includes('[') && text.includes('](')) {
-      const linkMatch = text.match(/\[([^\]]+)\]\(([^)]+)\)/);
-      if (linkMatch) {
-        console.log("🔗 FRONTEND DEBUG: Found markdown link:", linkMatch[0]);
-        console.log("🔗 FRONTEND DEBUG: Link text:", linkMatch[1]);
-        console.log("🔗 FRONTEND DEBUG: Link URL:", linkMatch[2]);
-        console.log("🔗 FRONTEND DEBUG: URL starts with:", linkMatch[2].substring(0, 50));
-      }
-    }
-  }
 
   const [displayedText, setDisplayedText] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -80,10 +65,7 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
   // Preprocess URLs for final Markdown rendering
   const markdownText = useMemo(() => {
     if (enableMarkdown) {
-      const processed = preprocessUrlsForMarkdown(text);
-      console.log("🔗 FRONTEND DEBUG: Original text:", text);
-      console.log("🔗 FRONTEND DEBUG: Processed markdown text:", processed);
-      return processed;
+      return preprocessUrlsForMarkdown(text);
     }
     return text;
   }, [text, enableMarkdown]);
@@ -126,15 +108,8 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
             components={{
               // Custom link component to ensure proper URL handling
               a: ({ href, children, ...props }) => {
-                console.log("🔗 FRONTEND DEBUG: Rendering link with href:", href);
-                console.log("🔗 FRONTEND DEBUG: Link children:", children);
-                console.log("🔗 FRONTEND DEBUG: Link props:", props);
-                console.log("🔗 FRONTEND DEBUG: href type:", typeof href);
-                console.log("🔗 FRONTEND DEBUG: href length:", href?.length);
-                
                 // Ensure href is absolute URL
                 const absoluteHref = href?.startsWith('http') ? href : `https://${href}`;
-                console.log("🔗 FRONTEND DEBUG: Absolute href:", absoluteHref);
                 
                 return (
                   <a
@@ -143,10 +118,6 @@ export const TypewriterText: React.FC<TypewriterTextProps> = ({
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:text-blue-800 underline break-all"
                     style={{ margin: 0, padding: 0, lineHeight: '1.2' }}
-                    onClick={(e) => {
-                      console.log("🔗 FRONTEND DEBUG: Link clicked, href:", absoluteHref);
-                      console.log("🔗 FRONTEND DEBUG: Event target:", e.target);
-                    }}
                     {...props}
                   >
                     {children}

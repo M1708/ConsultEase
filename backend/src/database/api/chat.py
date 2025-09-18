@@ -1110,9 +1110,9 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 result_status = result["status"] or "completed"
 
             print(f"🔍 CHAT API: Final ChatResponse being returned:")
-            print(f"🔍 CHAT API: - response: {response_content[:100]}...")
-            print(f"🔍 CHAT API: - response type: {type(response_content)}")
             print(f"🔍 CHAT API: - response length: {len(str(response_content))}")
+            print(f"🔍 CHAT API: - response preview: {response_content[:200]}...")
+            print(f"🔍 CHAT API: - response type: {type(response_content)}")
             print(f"🔍 CHAT API: - success: {not is_error}")
             
             final_response = ChatResponse(

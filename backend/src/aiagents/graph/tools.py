@@ -213,10 +213,11 @@ async def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
 async def _get_contracts_for_next_month_billing_wrapper(**kwargs) -> Dict[str, Any]:
     kwargs.pop('db', None)
     context = kwargs.pop('context', None)
+    client_name = kwargs.pop('client_name', None)
     if context is None:
         from datetime import date
         context = {'today': date.today()}
-    result = await get_contracts_for_next_month_billing_tool(context)
+    result = await get_contracts_for_next_month_billing_tool(client_name=client_name, context=context)
     return result.model_dump()
 
 
@@ -1085,6 +1086,8 @@ async def tool_executor_node(state: AgentState) -> Dict:
     print(f"🔍 DEBUG: Tool executor - context keys: {list(context.keys()) if isinstance(context, dict) else 'Not a dict'}")
 
     results = []
+    update_all_used = False  # Track if update_all=true has been used
+    
     for i, tool_call in enumerate(tool_calls):
         print(f"🔍 DEBUG: Tool executor - processing tool call {i}")
         
@@ -1100,6 +1103,16 @@ async def tool_executor_node(state: AgentState) -> Dict:
             
         print(f"🔍 DEBUG: Tool executor - tool name: {tool_name}")
         print(f"🔍 DEBUG: Tool executor - tool call id: {tool_call_id}")
+        
+        # Skip redundant individual contract calls if update_all=true was already used
+        if tool_name == 'update_contract':
+            args = json.loads(arguments_str)
+            if args.get('update_all') == True:
+                update_all_used = True
+                print(f"🔍 DEBUG: Tool executor - update_all=true detected, will skip individual contract calls")
+            elif update_all_used and 'contract_id' in args:
+                print(f"🔍 DEBUG: Tool executor - skipping individual contract call {args.get('contract_id')} because update_all was already used")
+                continue
 
         if tool_name not in TOOL_REGISTRY:
             print(f"🔍 DEBUG: Tool executor - tool {tool_name} not in registry")
@@ -1150,7 +1163,8 @@ async def tool_executor_node(state: AgentState) -> Dict:
                 # Format the response as a user-friendly message instead of raw JSON
                 if isinstance(output, dict) and 'message' in output:
                     result_content = output['message']
-                    print(f"🔍 DEBUG: Tool executor - formatted message: {result_content[:100]}...")
+                    print(f"🔍 DEBUG: Tool executor - formatted message length: {len(result_content)}")
+                    print(f"🔍 DEBUG: Tool executor - message preview: {result_content[:200]}...")
                 else:
                     result_content = json.dumps(output, default=json_serializer)
                     print(f"🔍 DEBUG: Tool executor - result content length: {len(result_content)}")
