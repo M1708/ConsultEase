@@ -375,7 +375,9 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
             if params.update_all:
                 message = f"✅ Successfully updated {len(contracts_to_update)} contracts for '{client.client_name}'. Updated fields: {', '.join(update_fields)}"
             else:
-                message = f"✅ Successfully updated contract for '{client.client_name}'. Updated fields: {', '.join(update_fields)}"
+                # Include contract ID in single contract update message
+                contract_id = contracts_to_update[0].contract_id if contracts_to_update else "Unknown"
+                message = f"✅ Successfully updated contract {contract_id} for '{client.client_name}'. Updated fields: {', '.join(update_fields)}"
             
             return ContractToolResult(
                 success=True,

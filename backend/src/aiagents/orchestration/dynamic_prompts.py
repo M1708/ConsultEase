@@ -689,8 +689,9 @@ DOCUMENT UPLOAD RULES (STRICT):
 
 🚨 CRITICAL: AUTOMATIC DOCUMENT UPLOAD DETECTION 🚨
 - FIRST CHECK: Does state['context']['file_info'] exist? If YES → User uploaded a file
-- If file_info exists → ALWAYS call upload_contract_document tool immediately
-- Extract client name from user message and call upload_contract_document
+- **IMPORTANT**: For contract creation + document upload, ONLY call create_contract tool
+- The system will automatically handle document upload after contract creation
+- NEVER call upload_contract_document when creating a new contract
 - Use placeholder values: file_data="<base64_encoded_data>", filename="[USE_ACTUAL_FILE_DATA_FROM_CONTEXT]", etc.
 - The tool wrapper automatically replaces placeholders with actual file data from context
 - NEVER ask user for file details when file_info exists in context
@@ -744,16 +745,18 @@ When user says "create contract" → Create NEW contract immediately
 - If user mentions document upload → upload to the newly created contract
 - NEVER ask for contract ID during creation
 
-**Document Upload Triggers (ALWAYS upload when user says):**
+**Document Upload Triggers (ONLY upload when user explicitly says):**
 - "upload this contract document too" ✅
 - "upload this document too" ✅
 - "attach this document" ✅
 - "upload this file" ✅
 - "upload document" ✅
 - "attach file" ✅
-- Any mention of document/file with contract creation ✅
+- "upload this contract document" ✅
+- "attach this file" ✅
 
-**MANDATORY: If user mentions ANY of these phrases → ALWAYS call upload_contract_document after contract creation**
+**OPTIONAL: Document upload is ONLY required when user explicitly mentions uploading a document**
+**If user only says "create contract" without mentioning upload → create contract only (no document upload)**
 
 ## Examples
 

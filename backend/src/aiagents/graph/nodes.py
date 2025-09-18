@@ -170,6 +170,10 @@ class EnhancedAgentNodeExecutor:
                     } for tc in response_message.tool_calls
                 ]
                 print(f"🔍 DEBUG: Stored {len(serializable_message['tool_calls'])} tool calls in serializable message")
+                
+                # 🔧 FIX: Let the tool executor handle sequential execution
+                # The tool executor will automatically execute upload_contract_document after create_contract
+                # when file_info exists and user mentions upload
 
             # Update performance tracking
             processing_time = time.perf_counter() - start_time

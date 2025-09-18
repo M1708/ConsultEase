@@ -8,6 +8,23 @@ with proper type hints and parameter validation.
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 import asyncio
+import re
+from datetime import datetime
+
+def _convert_date_format(date_str: str) -> str:
+    """Convert date from 'Feb 15th 2026' format to '2026-02-15' format"""
+    try:
+        # Remove ordinal suffixes (st, nd, rd, th)
+        date_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_str)
+        
+        # Parse the date
+        parsed_date = datetime.strptime(date_str.strip(), "%b %d %Y")
+        
+        # Return in YYYY-MM-DD format
+        return parsed_date.strftime("%Y-%m-%d")
+    except ValueError:
+        # If parsing fails, return the original string
+        return date_str
 
 # Import existing tools
 from ..tools.contract_tools import (
@@ -23,6 +40,68 @@ from ..tools.contract_tools import (
     SmartContractParams,
     ContractToolResult
 )
+
+def _extract_field_from_request(user_request: str) -> Optional[Dict[str, Any]]:
+    """Extract the field to update and its value from user request."""
+    user_request_lower = user_request.lower()
+    
+    # Field extraction patterns
+    field_patterns = [
+        # Billing frequency patterns
+        (r"billing\s+frequency\s+to\s+(\w+)", "billing_frequency"),
+        (r"change\s+billing\s+frequency\s+to\s+(\w+)", "billing_frequency"),
+        (r"update\s+billing\s+frequency\s+to\s+(\w+)", "billing_frequency"),
+        (r"set\s+billing\s+frequency\s+to\s+(\w+)", "billing_frequency"),
+        
+        # Amount patterns
+        (r"amount\s+to\s+\$?([\d,]+(?:\.\d{2})?)", "original_amount"),
+        (r"change\s+amount\s+to\s+\$?([\d,]+(?:\.\d{2})?)", "original_amount"),
+        (r"update\s+amount\s+to\s+\$?([\d,]+(?:\.\d{2})?)", "original_amount"),
+        (r"set\s+amount\s+to\s+\$?([\d,]+(?:\.\d{2})?)", "original_amount"),
+        
+        # Status patterns
+        (r"status\s+to\s+(\w+)", "status"),
+        (r"change\s+status\s+to\s+(\w+)", "status"),
+        (r"update\s+status\s+to\s+(\w+)", "status"),
+        (r"set\s+status\s+to\s+(\w+)", "status"),
+        
+        # Date patterns
+        (r"start\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "start_date"),
+        (r"end\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "end_date"),
+        
+        # Billing prompt date patterns
+        (r"next\s+billing\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "billing_prompt_next_date"),
+        (r"billing\s+prompt\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "billing_prompt_next_date"),
+        (r"update\s+next\s+billing\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "billing_prompt_next_date"),
+        (r"change\s+next\s+billing\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "billing_prompt_next_date"),
+        (r"set\s+next\s+billing\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "billing_prompt_next_date"),
+    ]
+    
+    for pattern, field_name in field_patterns:
+        match = re.search(pattern, user_request_lower)
+        if match:
+            value = match.group(1)
+            
+            # Special handling for different field types
+            if field_name == "original_amount":
+                # Remove commas and convert to float
+                value = float(value.replace(",", ""))
+            elif field_name in ["start_date", "end_date"]:
+                # Keep as string for date fields
+                pass
+            elif field_name == "billing_prompt_next_date":
+                # Convert date format from "Feb 15th 2026" to "2026-02-15"
+                value = _convert_date_format(value)
+            elif field_name == "billing_frequency":
+                # Capitalize first letter
+                value = value.capitalize()
+            elif field_name == "status":
+                # Keep as lowercase
+                value = value.lower()
+            
+            return {field_name: value}
+    
+    return None
 
 # Import employee tools
 from ..tools.employee_tools import (
@@ -79,6 +158,7 @@ class ContractUpdateParams(BaseModel):
     contract_type: Optional[str] = Field(None, description="New contract type")
     original_amount: Optional[float] = Field(None, description="New contract amount")
     billing_frequency: Optional[str] = Field(None, description="New billing frequency")
+    billing_prompt_next_date: Optional[str] = Field(None, description="New billing prompt date in YYYY-MM-DD format")
     status: Optional[str] = Field(None, description="New contract status")
     notes: Optional[str] = Field(None, description="Additional notes")
 
@@ -206,6 +286,19 @@ class ToolRegistry:
                 # Add context if available
                 if context:
                     update_params['context'] = context
+
+                # Extract field from original user request if available
+                if context and context.get('original_user_request'):
+                    print(f"🔍 FIELD EXTRACTION: Original user request: {context['original_user_request']}")
+                    extracted_field = _extract_field_from_request(context['original_user_request'])
+                    if extracted_field:
+                        print(f"🔍 FIELD EXTRACTION: Extracted field: {extracted_field}")
+                        update_params.update(extracted_field)
+                        print(f"🔍 FIELD EXTRACTION: Updated params with extracted field: {update_params}")
+                    else:
+                        print(f"🔍 FIELD EXTRACTION: No field extracted from request")
+                else:
+                    print(f"🔍 FIELD EXTRACTION: No original_user_request in context")
 
                 # Call existing tool
                 result = await update_contract_tool(UpdateContractParams(**update_params))

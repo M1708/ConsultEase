@@ -1,7 +1,7 @@
 
 import json
 from sre_parse import ANY
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import re
 from datetime import datetime
 from sqlalchemy import select
@@ -83,6 +83,14 @@ async def _smart_create_contract_wrapper(**kwargs) -> Dict[str, Any]:
     """Enhanced wrapper for creating contracts with comprehensive response details"""
     kwargs.pop('db', None)
     context = kwargs.pop('context', None)
+    
+    # Ensure contract_type is set - infer from context if missing
+    if not kwargs.get('contract_type'):
+        if kwargs.get('original_amount'):
+            kwargs['contract_type'] = 'Fixed'  # Default for contracts with specific amounts
+        else:
+            kwargs['contract_type'] = 'Fixed'  # Default fallback
+    
     params = SmartContractParams(**kwargs)
     result = await smart_create_contract_tool(params, context)
     
@@ -180,6 +188,24 @@ async def _get_contracts_by_billing_date_wrapper(**kwargs) -> Dict[str, Any]:
 async def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
     db = kwargs.pop('db', None)
     context = kwargs.pop('context', None)
+    
+    # Extract field from original user request if available
+    if context and context.get('original_user_request'):
+        print(f"🔍 FIELD EXTRACTION: Original user request: {context['original_user_request']}")
+        
+        # Import the field extraction function
+        from src.aiagents.agents_sdk.tool_definitions import _extract_field_from_request
+        extracted_field = _extract_field_from_request(context['original_user_request'])
+        if extracted_field:
+            print(f"🔍 FIELD EXTRACTION: Extracted field: {extracted_field}")
+            # Update kwargs with extracted field
+            kwargs.update(extracted_field)
+            print(f"🔍 FIELD EXTRACTION: Updated kwargs with extracted field: {extracted_field}")
+        else:
+            print(f"🔍 FIELD EXTRACTION: No field extracted from request")
+    else:
+        print(f"🔍 FIELD EXTRACTION: No original_user_request in context")
+    
     params = UpdateContractParams(**kwargs)
     result = await update_contract_tool(params, context)
     return result.model_dump()
@@ -193,12 +219,6 @@ async def _get_contracts_for_next_month_billing_wrapper(**kwargs) -> Dict[str, A
     result = await get_contracts_for_next_month_billing_tool(context)
     return result.model_dump()
 
-async def _update_contract_wrapper(**kwargs) -> Dict[str, Any]:
-    kwargs.pop('db', None)
-    context = kwargs.pop('context', None)
-    params = UpdateContractParams(**kwargs)
-    result = await update_contract_tool(params, context)
-    return result.model_dump()
 
 async def _update_client_wrapper(**kwargs) -> Dict[str, Any]:
     kwargs.pop('db', None)
@@ -1105,15 +1125,13 @@ async def tool_executor_node(state: AgentState) -> Dict:
                 if 'data' in state and state['data']:
                     enhanced_context.update(state['data'])
 
-                print(f"🔍 DEBUG: Tool {tool_name} called with context:")
-                print(f"🔍 DEBUG: Original context: {context}")
-                print(f"🔍 DEBUG: State data: {state.get('data', {})}")
-                print(f"🔍 DEBUG: Enhanced context keys: {list(enhanced_context.keys()) if isinstance(enhanced_context, dict) else 'Not a dict'}")
-                print(f"🔍 DEBUG: Tool arguments keys: {list(args.keys()) if isinstance(args, dict) else 'Not a dict'}")
+                print(f"🔍 DEBUG: Tool {tool_name} called with enhanced context")
 
                 args['context'] = enhanced_context
 
                 print(f"🔍 DEBUG: Tool executor - calling {tool_name}...")
+                if tool_name == "update_contract":
+                    print(f"🔍 FIELD EXTRACTION: About to call update_contract with context containing original_user_request: {enhanced_context.get('original_user_request', 'NOT_FOUND')}")
                 output = await tool_function(**args)
                 print(f"🔍 DEBUG: Tool executor - {tool_name} completed successfully")
 
@@ -1129,8 +1147,77 @@ async def tool_executor_node(state: AgentState) -> Dict:
                         return float(obj)
                     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
-                result_content = json.dumps(output, default=json_serializer)
-                print(f"🔍 DEBUG: Tool executor - result content length: {len(result_content)}")
+                # Format the response as a user-friendly message instead of raw JSON
+                if isinstance(output, dict) and 'message' in output:
+                    result_content = output['message']
+                    print(f"🔍 DEBUG: Tool executor - formatted message: {result_content[:100]}...")
+                else:
+                    result_content = json.dumps(output, default=json_serializer)
+                    print(f"🔍 DEBUG: Tool executor - result content length: {len(result_content)}")
+                
+                # 🔧 FIX: Check if we need to execute upload_contract_document after create_contract
+                has_file_info = bool(state.get('context', {}).get('file_info'))
+                original_request = state.get('data', {}).get('original_user_request', '')
+                user_wants_upload = 'upload' in original_request.lower()
+                print(f"🔧 FIX: Sequential execution check - tool: {tool_name}, has_file: {has_file_info}, wants_upload: {user_wants_upload}")
+                
+                if (tool_name == "create_contract" and 
+                    has_file_info and
+                    user_wants_upload):
+                    
+                    print("🔧 FIX: Executing upload_contract_document after create_contract")
+                    
+                    # Extract client name and contract ID from the create_contract result
+                    client_name = args.get('client_name', 'Unknown')
+                    
+                    # Get contract ID directly from the tool output data
+                    contract_id = None
+                    if isinstance(output, dict) and 'data' in output:
+                        # Check multiple possible locations for contract_id
+                        data = output['data']
+                        contract_id = (
+                            data.get('contract_id') or  # Direct contract_id
+                            data.get('contract', {}).get('contract_id') or  # Nested in contract
+                            data.get('operation') == 'create_contract' and data.get('contract', {}).get('contract_id')
+                        )
+                        print(f"🔧 FIX: Found contract ID {contract_id} from tool output data")
+                    else:
+                        print(f"🔧 FIX: No contract ID found in tool output data")
+                    
+                    if contract_id:
+                        # Execute upload_contract_document with contract ID and actual file data
+                        file_info = state.get('context', {}).get('file_info', {})
+                        upload_args = {
+                            'client_name': client_name,
+                            'contract_id': int(contract_id),
+                            'file_data': file_info.get('file_data', ''),
+                            'filename': file_info.get('filename', ''),
+                            'file_size': file_info.get('file_size', 0),
+                            'mime_type': file_info.get('mime_type', ''),
+                            'context': enhanced_context
+                        }
+                        
+                        print(f"🔧 FIX: Upload args - client: {client_name}, contract_id: {contract_id}, filename: {file_info.get('filename', '')}")
+                        
+                        try:
+                            upload_tool = TOOL_REGISTRY['upload_contract_document']
+                            upload_output = await upload_tool(**upload_args)
+                            
+                            # Combine the results
+                            if isinstance(upload_output, dict) and 'message' in upload_output:
+                                upload_message = upload_output['message']
+                                result_content = f"{result_content}\n\n{upload_message}"
+                                print(f"🔧 FIX: Combined result: {result_content[:200]}...")
+                            else:
+                                result_content = f"{result_content}\n\nDocument uploaded successfully."
+                                print(f"🔧 FIX: Added upload confirmation")
+                                
+                        except Exception as e:
+                            print(f"🔧 FIX: Upload failed: {e}")
+                            result_content = f"{result_content}\n\nNote: Document upload failed - {str(e)}"
+                    else:
+                        print(f"🔧 FIX: Could not extract contract ID from tool output data")
+                        result_content = f"{result_content}\n\nNote: Could not upload document - contract ID not found in tool output"
 
             except Exception as e:
                 print(f"❌ Tool executor - error calling {tool_name}: {e}")
@@ -1169,7 +1256,7 @@ def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
     ALLOWED_TOOLS = {
         'update': ['update_contract', 'update_contract_by_id'],
         'delete': ['delete_contract', 'delete_contract_document'],
-        'create': ['create_contract', 'create_client_and_contract', 'create_client'],
+        'create': ['create_contract', 'create_client_and_contract', 'create_client', 'upload_contract_document'],
         'upload': ['get_client_contracts', 'upload_contract_document'],
         'show': ['get_contracts_by_client', 'get_client_details', 'get_contract_details'],
         'search': ['search_contracts', 'search_clients']

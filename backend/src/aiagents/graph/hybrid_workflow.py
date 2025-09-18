@@ -76,12 +76,23 @@ def enhanced_router(state: AgentState) -> str:
     print(f"🔍 DEBUG: enhanced_router called with state keys: {list(state.keys()) if isinstance(state, dict) else 'Not a dict'}")
 
     try:
+        # 🔧 FIX: Check if we've already routed to prevent multiple iterations
+        if state.get('data', {}).get('routing_completed'):
+            print(f"🔍 DEBUG: enhanced_router - routing already completed, skipping")
+            return state.get('data', {}).get('current_agent', 'client_agent')
+        
+        # Mark routing as completed to prevent loops
+        if 'data' not in state:
+            state['data'] = {}
+        state['data']['routing_completed'] = True
+        
         orchestrator = get_hybrid_orchestrator()
         agent_status = orchestrator.get_agent_status()
 
         # If SDK is available and agents are initialized, prefer hybrid workflow
         if agent_status["sdk_available"] and agent_status["sdk_agents_initialized"]:
             print(f"🔍 DEBUG: enhanced_router - using hybrid_agent")
+            state['data']['current_agent'] = 'hybrid_agent'
             return "hybrid_agent"
 
         # Fall back to original routing
@@ -93,15 +104,18 @@ def enhanced_router(state: AgentState) -> str:
         if isinstance(router_result, dict) and "current_agent" in router_result:
             agent_name = router_result["current_agent"]
             print(f"🔍 DEBUG: enhanced_router - extracted agent name: {agent_name}")
+            state['data']['current_agent'] = agent_name
             return agent_name
         else:
             print(f"🔍 DEBUG: enhanced_router - router result is not a dict or missing current_agent, returning client_agent")
+            state['data']['current_agent'] = 'client_agent'
             return "client_agent"
 
     except Exception as e:
         print(f"❌ enhanced_router error: {e}")
         import traceback
         print(f"❌ enhanced_router traceback: {traceback.format_exc()}")
+        state['data']['current_agent'] = 'client_agent'
         return "client_agent"
 
 # This conditional edge routes from the master router to the correct agent
@@ -225,9 +239,10 @@ def after_tool_execution(state: AgentState) -> str:
             print("🛑 LOOP PREVENTION: Tool execution completed successfully, ending conversation")
             return END
 
-    # CRITICAL FIX: After tool execution, always return to the current agent
-    # so it can process and format the tool results
-    return state["current_agent"]
+    # CRITICAL FIX: After tool execution, end the workflow
+    # The tool results are already formatted and ready for the user
+    print("🔍 DEBUG: Tool execution completed, ending workflow")
+    return END
 
 # After any agent runs, we check if we need to run tools
 workflow.add_conditional_edges(
@@ -266,13 +281,6 @@ workflow.add_conditional_edges(
     "tool_executor",
     after_tool_execution,
     {
-        "client_agent": "client_agent",
-        "contract_agent": "contract_agent",
-        "employee_agent": "employee_agent",
-        "deliverable_agent": "deliverable_agent",
-        "time_agent": "time_agent",
-        "user_agent": "user_agent",
-        "hybrid_agent": "hybrid_agent",  # Allow tools to route back to hybrid agent
         END: END
     }
 )
