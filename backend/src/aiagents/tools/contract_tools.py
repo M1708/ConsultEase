@@ -283,6 +283,7 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                 contract = contracts[0]
             elif params.update_all:
                 # User wants to update all contracts - proceed with update
+                # contracts_to_update will be set to all contracts below
                 pass
             else:
                 # Multiple contracts - ask user to choose
@@ -2202,6 +2203,10 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
             user_confirmed = (params.user_response and 
                             any(keyword in params.user_response.lower().strip() for keyword in confirmation_keywords))
             
+            # Also check if confirm_deletion is explicitly set to true
+            if params.confirm_deletion:
+                user_confirmed = True
+            
             # Check if user explicitly said to delete with contracts (skip confirmation)
             skip_confirmation = ('and all' in params.client_name.lower() or 
                                'and all its' in params.client_name.lower() or
@@ -2211,7 +2216,7 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
                 # No contracts, show confirmation first
                 if user_confirmed or skip_confirmation or params.confirm_deletion:
                     # User confirmed, proceed with deletion
-                    pass
+                    pass  # Will continue to deletion code below
                 else:
                     return ContractToolResult(
                         success=True,
@@ -2220,33 +2225,35 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
                             f"**This will permanently delete:**\n"
                             f"- All client contact information\n"
                             f"- All billing history\n\n"
-                            f"Reply **yes/ok/alright/go ahead** to confirm, or **cancel** to abort."
+                            f"Reply **yes**, **ok**, **alright**, or **go ahead** to confirm, or **cancel** to abort."
                         )
                     )
-            elif user_confirmed or skip_confirmation or params.confirm_deletion:
-                # User confirmed, proceed with deletion
-                pass
             else:
-                # Show confirmation with contract details
-                contract_list = []
-                for c in contracts:
-                    amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
-                    contract_list.append(f"- **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {c.status}")
-                
-                return ContractToolResult(
-                    success=True,
-                    message=(
-                        f"⚠️ **Confirm deletion of client '{client.client_name}'**\n\n"
-                        f"**This will permanently delete:**\n"
-                        f"- {len(contracts)} contract(s) and their documents\n"
-                        f"- All client contact information\n"
-                        f"- All billing history\n\n"
-                        f"**Contracts to be deleted:**\n" + "\n".join(contract_list) + "\n\n"
-                        f"Reply **yes/ok/alright/go ahead** to confirm, or **cancel** to abort."
+                # Has contracts, check if user confirmed
+                if user_confirmed or skip_confirmation or params.confirm_deletion:
+                    # User confirmed, proceed with deletion
+                    pass  # Will continue to deletion code below
+                else:
+                    # Show confirmation with contract details
+                    contract_list = []
+                    for c in contracts:
+                        amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
+                        contract_list.append(f"- **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {c.status}")
+                    
+                    return ContractToolResult(
+                        success=True,
+                        message=(
+                            f"⚠️ **Confirm deletion of client '{client.client_name}'**\n\n"
+                            f"**This will permanently delete:**\n"
+                            f"- {len(contracts)} contract(s) and their documents\n"
+                            f"- All client contact information\n"
+                            f"- All billing history\n\n"
+                            f"**Contracts to be deleted:**\n" + "\n".join(contract_list) + "\n\n"
+                            f"Reply **yes**, **ok**, **alright**, or **go ahead** to confirm, or **cancel** to abort."
+                        )
                     )
-                )
             
-            # Proceed with deletion
+            # Proceed with deletion (only reached if user confirmed or skip_confirmation is True)
             deleted_contracts = 0
             deleted_documents = 0
             storage_service = SupabaseStorageService()

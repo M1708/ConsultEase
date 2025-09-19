@@ -85,6 +85,13 @@ class ContextExtractor:
                 if previous_client:
                     print(f"🔍 DEBUG: Switching from specific client '{previous_client}' to 'all clients' - clearing contract ID")
                     context['current_contract_id'] = None
+        else:
+            # No client name extracted - preserve existing client context for responses like "all"
+            if existing_state and 'current_client' in existing_state:
+                context['current_client'] = existing_state['current_client']
+                print(f"🔍 DEBUG: No client name extracted - preserving existing client context: {context['current_client']}")
+            else:
+                print(f"🔍 DEBUG: No client name extracted and no existing client context")
 
         # Extract contract ID only if no client switching occurred
         contract_id = None
@@ -117,9 +124,9 @@ class ContextExtractor:
                     context['current_workflow'] = None  # Clear workflow when switching operations
                     context['current_contract_id'] = None  # Clear contract ID when switching operations
         else:
-            # If it's just a contract ID, check if we have a pending operation from previous context
-            if contract_id and not is_new_operation:
-                print(f"🔍 DEBUG: Contract ID provided without operation - will preserve existing operation context")
+            # If it's just a contract ID or a response like "all", check if we have a pending operation from previous context
+            if (contract_id and not is_new_operation) or (not is_new_operation and not contract_id):
+                print(f"🔍 DEBUG: Response provided without operation - will preserve existing operation context")
                 # Don't extract user_operation, let the existing one be preserved
             else:
                 print(f"🔍 DEBUG: Not a new operation request (skipping user_operation extraction)")

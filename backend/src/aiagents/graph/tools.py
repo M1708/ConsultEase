@@ -1352,10 +1352,17 @@ def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
     # PARAMETER CORRECTION: Fix common parameter issues that could cause infinite loops
     # REVERT: If parameter correction causes issues, revert to basic tool validation
     if tool_name == "update_contract" and not (state.get("data", {}).get("client_name") or state.get("data", {}).get("current_client")):
-        # If updating contract but no client specified, switch to search mode
-        print(f"🔍 DEBUG: Parameter correction - switching {tool_name} to search_contracts due to missing client_name")
-        print(f"🔍 DEBUG: State data for debugging: {state.get('data', {})}")
-        return "search_contracts"
+        # Check if this is a response to a previous update request (like "all")
+        user_operation = state.get("data", {}).get("user_operation", "")
+        if user_operation and user_operation.startswith("update"):
+            # This is a response to an update request, don't switch to search
+            print(f"🔍 DEBUG: Parameter correction - preserving {tool_name} for update operation response")
+            return tool_name
+        else:
+            # If updating contract but no client specified, switch to search mode
+            print(f"🔍 DEBUG: Parameter correction - switching {tool_name} to search_contracts due to missing client_name")
+            print(f"🔍 DEBUG: State data for debugging: {state.get('data', {})}")
+            return "search_contracts"
     
     if tool_name == "upload_contract_document" and not state.get("data", {}).get("file_info"):
         # If uploading document but no file info, this could cause issues
