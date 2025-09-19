@@ -461,8 +461,11 @@ async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
                     file_size = document_result.data.get('document_file_size', 'Unknown')
                     uploaded_at = document_result.data.get('document_uploaded_at', 'N/A')
                     
-                    # Format file size display
-                    if file_size and file_size != 'Unknown':
+                    # Create document details section - only show available information
+                    success_message += f"\n\n📄 **Document Details:**\n- **Filename:** [{document_filename}]({download_url})\n- **Contract ID:** {contract_data.get('contract_id')}"
+                    
+                    # Only add file size if it's available and not "Unknown"
+                    if file_size and file_size != 'Unknown' and file_size != 'N/A':
                         try:
                             size_bytes = int(file_size)
                             if size_bytes < 1024:
@@ -471,13 +474,12 @@ async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
                                 file_size_display = f"{size_bytes / 1024:.1f} KB"
                             else:
                                 file_size_display = f"{size_bytes / (1024 * 1024):.1f} MB"
+                            success_message += f"\n- **File Size:** {file_size_display}"
                         except (ValueError, TypeError):
-                            file_size_display = file_size
-                    else:
-                        file_size_display = "Unknown"
+                            pass  # Skip if we can't format the size
                     
-                    # Format upload date
-                    if uploaded_at and uploaded_at != 'N/A':
+                    # Only add upload date if it's available and not "N/A"
+                    if uploaded_at and uploaded_at != 'N/A' and uploaded_at != 'Unknown':
                         try:
                             from datetime import datetime
                             if isinstance(uploaded_at, str):
@@ -486,13 +488,9 @@ async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
                             else:
                                 upload_date = uploaded_at
                             formatted_date = upload_date.strftime('%B %d, %Y, %I:%M %p')
+                            success_message += f"\n- **Uploaded At:** {formatted_date}"
                         except:
-                            formatted_date = str(uploaded_at)
-                    else:
-                        formatted_date = 'N/A'
-                    
-                    # Create document details section similar to upload_contract_document_tool
-                    success_message += f"\n\n📄 **Document Details:**\n- **Filename:** [{document_filename}]({download_url})\n- **File Size:** {file_size_display}\n- **Contract ID:** {contract_data.get('contract_id')}\n- **Uploaded At:** {formatted_date}"
+                            pass  # Skip if we can't format the date
                 else:
                     success_message += f"\n\n⚠️ **Document upload failed:** {document_result.message}"
             
