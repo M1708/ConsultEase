@@ -1091,6 +1091,27 @@ async def tool_executor_node(state: AgentState) -> Dict:
     if not tool_calls:
         return {"messages": []}
 
+    # CRITICAL: Extract context from the last user message before tool execution
+    # This ensures we have the latest client information for tool correction
+    try:
+        from .context_extractor import ContextExtractor
+        context_extractor = ContextExtractor()
+        
+        # Find the last user message
+        user_messages = [msg for msg in state['messages'] if isinstance(msg, dict) and msg.get('role') == 'user']
+        if user_messages:
+            last_user_message = user_messages[-1].get('content', '')
+            if last_user_message:
+                print(f"🔍 DEBUG: Tool executor - extracting context from: {last_user_message}")
+                existing_data = state.get('data', {})
+                user_context = await context_extractor.extract_context_from_user_message(last_user_message, existing_data)
+                if user_context:
+                    print(f"🔍 DEBUG: Tool executor - extracted context: {user_context}")
+                    context_extractor.update_state_with_context(state, user_context)
+                    print(f"🔍 DEBUG: Tool executor - updated state data: {state.get('data', {})}")
+    except Exception as e:
+        print(f"🔍 DEBUG: Tool executor - context extraction failed: {e}")
+
     # The database session should be in the state's data payload, but context is in state.context
     #db_session = state.get('data', {}).get('database')
     context = state.get('context', {})
@@ -1293,6 +1314,7 @@ def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
     if tool_name == "update_contract" and not (state.get("data", {}).get("client_name") or state.get("data", {}).get("current_client")):
         # If updating contract but no client specified, switch to search mode
         print(f"🔍 DEBUG: Parameter correction - switching {tool_name} to search_contracts due to missing client_name")
+        print(f"🔍 DEBUG: State data for debugging: {state.get('data', {})}")
         return "search_contracts"
     
     if tool_name == "upload_contract_document" and not state.get("data", {}).get("file_info"):

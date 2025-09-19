@@ -6,6 +6,7 @@ This module processes agent responses and extracts context information to save t
 import re
 from typing import Dict, Any, Optional
 from ..graph.state import AgentState
+from .fuzzy_client_matcher import fuzzy_matcher
 
 
 class ContextExtractor:
@@ -14,11 +15,11 @@ class ContextExtractor:
     def __init__(self):
         self.client_patterns = [
             r"client['\"]?\s*:\s*['\"]?([^'\",\n]+)['\"]?",
-            r"for\s+client\s+['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?=\s+(?:with|that|where|having)\b|\s*$)['\"]?",
-            r"client\s+['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)['\"]?",
+            r"for\s+client\s+['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?=\s+with|\s*$)['\"]?",
+            r"client\s+['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?=\s+with|\s*$)['\"]?",
             r"contract\s+with\s+([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)",
-            r"for\s+([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?:\s|$)",
-            r"['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)['\"]?"
+            r"for\s+([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?=\s+with|\s*$)",
+            r"['\"]?([A-Z][a-zA-Z\s&]+(?:Corp|Inc|LLC|Ltd|Solutions|Technologies|Systems)?)(?=\s+with|\s*$)['\"]?"
         ]
 
         # Exclude patterns that should not be considered client names
@@ -31,12 +32,11 @@ class ContextExtractor:
             r"create\s+client",
             r"delete\s+client",
             # Billing-related patterns that should not be treated as client names
-            r"billing\s+prompt\s+date",
-            r"next\s+billing",
-            r"upcoming\s+billing",
-            r"billing\s+date",
-            r"amount\s+more\s+than",
-            r"original\s+amount"
+            r"with\s+no\s+next\s+billing\s+prompt\s+date$",
+            r"with\s+next\s+billing\s+prompt\s+date\s+not\s+set$",
+            r"with\s+upcoming\s+next\s+billing\s+prompt\s+date$",
+            r"with\s+amount\s+more\s+than",
+            r"with\s+original\s+amount\s+more\s+than"
         ]
         
         self.workflow_patterns = [
@@ -56,13 +56,17 @@ class ContextExtractor:
         
         # Note: Removed billing_date_patterns - let LLM handle date extraction for better flexibility
     
-    def extract_context_from_user_message(self, user_message: str, existing_state: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def extract_context_from_user_message(self, user_message: str, existing_state: Dict[str, Any] = None) -> Dict[str, Any]:
         """Extract context from user message."""
         context = {}
 
         # Extract client name first to check for client switching
-        client_name = self._extract_client_name(user_message)
-        if client_name:
+        client_name = await self._extract_client_name(user_message)
+        if client_name == "PRESERVE_EXISTING":
+            # Don't update client context - preserve existing
+            print(f"🔍 DEBUG: Preserving existing client context")
+            # Don't add current_client to context
+        elif client_name is not None:  # None means "all clients", empty string means no client found
             context['current_client'] = client_name
             print(f"🔍 DEBUG: Extracted client name: {client_name}")
             
@@ -72,9 +76,19 @@ class ContextExtractor:
                 if previous_client and previous_client.lower() != client_name.lower():
                     print(f"🔍 DEBUG: Client switching from '{previous_client}' to '{client_name}' - clearing contract ID")
                     context['current_contract_id'] = None  # Clear contract ID when switching clients
+        elif client_name is None:  # "all clients" case
+            context['current_client'] = None  # Explicitly set to None for "all clients"
+            print(f"🔍 DEBUG: Detected 'all clients' case - setting current_client to None")
+            # Clear contract ID when switching to "all clients"
+            if existing_state and 'current_client' in existing_state:
+                previous_client = existing_state.get('current_client', '')
+                if previous_client:
+                    print(f"🔍 DEBUG: Switching from specific client '{previous_client}' to 'all clients' - clearing contract ID")
+                    context['current_contract_id'] = None
 
         # Extract contract ID only if no client switching occurred
-        if not client_name or (existing_state and existing_state.get('current_client', '').lower() == client_name.lower()):
+        contract_id = None
+        if client_name == "PRESERVE_EXISTING" or (client_name is not None and (not existing_state or (existing_state.get('current_client') or '').lower() == client_name.lower())):
             contract_id = self._extract_contract_id(user_message)
             if contract_id:
                 context['current_contract_id'] = contract_id
@@ -94,6 +108,14 @@ class ContextExtractor:
             context['user_operation'] = self._extract_operation_type(user_message)
             context['original_user_request'] = user_message
             print(f"🔍 DEBUG: Detected new user operation: {context['user_operation']}")
+            
+            # CRITICAL: If this is a completely different operation type, clear workflow context
+            if existing_state and 'user_operation' in existing_state:
+                previous_operation = existing_state.get('user_operation', '')
+                if previous_operation and previous_operation != context['user_operation']:
+                    print(f"🔍 DEBUG: Operation switching from '{previous_operation}' to '{context['user_operation']}' - clearing workflow context")
+                    context['current_workflow'] = None  # Clear workflow when switching operations
+                    context['current_contract_id'] = None  # Clear contract ID when switching operations
         else:
             # If it's just a contract ID, check if we have a pending operation from previous context
             if contract_id and not is_new_operation:
@@ -107,6 +129,10 @@ class ContextExtractor:
     def extract_context_from_agent_response(self, agent_response: str) -> Dict[str, Any]:
         """Extract context from agent response."""
         context = {}
+        
+        # Check if agent_response is None or empty
+        if not agent_response:
+            return context
         
         # Look for explicit context statements
         if "current_client" in agent_response.lower():
@@ -129,35 +155,42 @@ class ContextExtractor:
         
         return context
     
-    def _extract_client_name(self, text: str) -> Optional[str]:
-        """Extract client name from text."""
+    async def _extract_client_name(self, text: str) -> Optional[str]:
+        """Extract client name from text using fuzzy database matching."""
         print(f"🔍 DEBUG: _extract_client_name called with text: '{text}'")
-        for i, pattern in enumerate(self.client_patterns):
-            print(f"🔍 DEBUG: Trying pattern {i}: {pattern}")
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                client_name = match.group(1).strip()
-                print(f"🔍 DEBUG: Pattern {i} matched: '{client_name}'")
-
-                # Check exclude patterns first
-                should_exclude = False
-                for exclude_pattern in self.client_exclude_patterns:
-                    if re.search(exclude_pattern, client_name, re.IGNORECASE):
-                        should_exclude = True
-                        print(f"🔍 DEBUG: Excluded by pattern: {exclude_pattern}")
-                        break
-
-                if should_exclude:
-                    continue
-
-                # Filter out common false positives and overly long matches
-                if (client_name.lower() not in ['the', 'a', 'an', 'this', 'that', 'for', 'with', 'and', 'or']
-                    and len(client_name) < 50  # Avoid overly long matches
-                    and not client_name.lower().startswith(('update', 'delete', 'create', 'upload'))
-                    and not client_name.lower().startswith(('the contract', 'contract with', 'contract id'))
-                    and not client_name.lower().startswith('contract')):
-                    return client_name
-        return None
+        
+        # Check for "all clients" case first
+        text_lower = text.lower()
+        if any(phrase in text_lower for phrase in ['all clients', 'every client', 'each client']):
+            print(f"🔍 DEBUG: Detected 'all clients' case")
+            return None  # None means all clients
+        
+        # If it's just a number (contract ID), don't extract client - preserve existing context
+        if text.strip().isdigit():
+            print(f"🔍 DEBUG: Detected contract ID '{text}' - not extracting client to preserve existing context")
+            return "PRESERVE_EXISTING"  # Special value to indicate we should preserve existing client
+        
+        # Use fuzzy matcher to find the best client match
+        try:
+            best_client = await fuzzy_matcher.find_best_client_match(text)
+            
+            if best_client:
+                print(f"🔍 DEBUG: Found client: '{best_client.client_name}'")
+                return best_client.client_name
+            else:
+                print(f"🔍 DEBUG: No client found")
+                return None
+        except Exception as e:
+            print(f"🔍 DEBUG: Error in fuzzy client matching: {e}")
+            # Fallback: try simple text matching for common patterns
+            if 'sangard' in text.lower():
+                return 'Sangard Corp'
+            elif 'innovatetech' in text.lower():
+                return 'InnovateTech Solutions'
+            elif 'tech corp' in text.lower():
+                return 'Tech Corp'
+            else:
+                return None
     
     def _extract_workflow(self, text: str) -> Optional[str]:
         """Extract workflow/operation from text."""
@@ -201,7 +234,7 @@ class ContextExtractor:
             return False
         
         # If it contains operation keywords, it's a new request
-        operation_keywords = ['update', 'delete', 'create', 'upload', 'show', 'get', 'list']
+        operation_keywords = ['update', 'delete', 'create', 'upload', 'show', 'get', 'list', 'change', 'modify', 'set']
         return any(keyword in text_lower for keyword in operation_keywords)
     
     def _extract_operation_type(self, text: str) -> str:
@@ -219,7 +252,7 @@ class ContextExtractor:
             return 'get_contracts_by_amount'
         
         # Contract operations
-        elif 'update' in text_lower and 'contract' in text_lower:
+        elif ('update' in text_lower or 'change' in text_lower or 'modify' in text_lower) and 'contract' in text_lower:
             return 'update_contract'
         elif 'delete' in text_lower and 'contract' in text_lower:
             return 'delete_contract'

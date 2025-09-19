@@ -120,23 +120,28 @@ class EnhancedAgentNodeExecutor:
                 await self._lookup_contract_and_save_client_name(state)
 
             # SHORT-CIRCUIT: If we have all context needed, bypass LLM and call tool directly
+            print(f"🔍 DEBUG: About to check short-circuit for agent: {agent_name}")
+            print(f"🔍 DEBUG: State data before short-circuit: {state.get('data', {})}")
             if await self._should_short_circuit(state, agent_name):
+                print(f"🔍 DEBUG: Short-circuit triggered, calling direct tool execution")
                 return await self._execute_direct_tool_call(state, agent_name)
+            else:
+                print(f"🔍 DEBUG: Short-circuit NOT triggered, proceeding with LLM")
 
-            # Execute with performance monitoring
-            response = await self._execute_with_monitoring(
-                prepared_messages, agent_instance.tools, agent_name
-            )
+                # Execute with performance monitoring
+                response = await self._execute_with_monitoring(
+                    prepared_messages, agent_instance.tools, agent_name
+                )
 
-            response_message = response.choices[0].message
-            print(f"🔍 DEBUG: OpenAI API response received")
-            print(f"🔍 DEBUG: OpenAI response message type: {type(response_message)}")
-            print(f"🔍 DEBUG: OpenAI response has tool_calls: {hasattr(response_message, 'tool_calls') and response_message.tool_calls}")
-            print(f"🔍 DEBUG: OpenAI response content preview: {getattr(response_message, 'content', 'No content')[:100] if getattr(response_message, 'content', None) else 'None'}")
+                response_message = response.choices[0].message
+                print(f"🔍 DEBUG: OpenAI API response received")
+                print(f"🔍 DEBUG: OpenAI response message type: {type(response_message)}")
+                print(f"🔍 DEBUG: OpenAI response has tool_calls: {hasattr(response_message, 'tool_calls') and response_message.tool_calls}")
+                print(f"🔍 DEBUG: OpenAI response content preview: {getattr(response_message, 'content', 'No content')[:100] if getattr(response_message, 'content', None) else 'None'}")
 
-            # DEBUG: Show current state after context extraction
-            print(f"🔍 DEBUG: State after context extraction:")
-            print(f"🔍 DEBUG: state['data'] = {state.get('data', {})}")
+                # DEBUG: Show current state after context extraction
+                print(f"🔍 DEBUG: State after context extraction:")
+                print(f"🔍 DEBUG: state['data'] = {state.get('data', {})}")
 
             # TODO: DEBUG - Debug tool calls to track recursion issue
             if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
@@ -668,9 +673,11 @@ class EnhancedAgentNodeExecutor:
                         print(f"🔍 DEBUG: Processing user message {i}: {content[:100]}...")
                         # Defensive: ensure state has data dict
                         existing_data = state.get('data', {}) if isinstance(state, dict) else {}
-                        user_msg_context = context_extractor.extract_context_from_user_message(content, existing_data)
+                        print(f"🔍 DEBUG: Existing data before context extraction: {existing_data}")
+                        user_msg_context = await context_extractor.extract_context_from_user_message(content, existing_data)
                         print(f"🔍 DEBUG: Extracted from user message: {user_msg_context}")
                         user_context.update(user_msg_context)
+                        print(f"🔍 DEBUG: Updated user_context: {user_context}")
                         has_new_user_message = True
 
             # Only extract context from agent response if there was a new user message and response_message exists
@@ -691,7 +698,9 @@ class EnhancedAgentNodeExecutor:
 
             # Update state with context
             if all_context:
+                print(f"🔍 DEBUG: State data before context update: {state.get('data', {})}")
                 context_extractor.update_state_with_context(state, all_context)
+                print(f"🔍 DEBUG: State data after context update: {state.get('data', {})}")
                 print(f"🔍 DEBUG: Context extraction completed: {list(all_context.keys())}")
             else:
                 print(f"🔍 DEBUG: No context extracted from messages")
@@ -705,13 +714,15 @@ class EnhancedAgentNodeExecutor:
 
         # Check if we have the required context for direct tool execution
         has_user_operation = 'user_operation' in data
-        has_client = 'current_client' in data
+        has_client = 'current_client' in data and data.get('current_client') is not None
         has_contract_id = 'current_contract_id' in data
         has_file_info = 'context' in state and state['context'].get('file_info')
         user_operation = data.get('user_operation')
 
         print(f"🔍 DEBUG: Short-circuit check - user_operation: {has_user_operation} ({user_operation}), client: {has_client}, contract_id: {has_contract_id}, file_info: {has_file_info}")
         print(f"🔍 DEBUG: Full state data: {data}")
+        print(f"🔍 DEBUG: current_client value: {data.get('current_client')}")
+        print(f"🔍 DEBUG: current_client is None: {data.get('current_client') is None}")
         if has_contract_id:
             print(f"🔍 DEBUG: Contract ID being used for short-circuit: {data.get('current_contract_id')}")
             print(f"🔍 DEBUG: Contract ID source - checking if it came from context extraction...")
@@ -741,10 +752,13 @@ class EnhancedAgentNodeExecutor:
 
         # Short-circuit for file uploads when file_info exists AND no contract_id is specified yet
         # This prevents short-circuiting during contract selection responses
+        print(f"🔍 DEBUG: Checking file upload short-circuit: has_user_operation={has_user_operation}, has_client={has_client}, has_file_info={has_file_info}, not has_contract_id={not has_contract_id}, user_operation={user_operation}")
         if (has_user_operation and has_client and has_file_info and not has_contract_id and
             user_operation == 'upload_contract_document'):
             print(f"🔍 DEBUG: Short-circuiting for initial file upload - calling upload_contract_document directly")
             return True
+        else:
+            print(f"🔍 DEBUG: File upload short-circuit conditions NOT met")
 
         # Only short-circuit for simple cases: contract ID responses after a clear operation request
         # This allows the LLM to handle complex field extraction and natural language variations

@@ -367,11 +367,18 @@ EXECUTION INSTRUCTIONS:
             section += f"Collaborating with: {', '.join(situational_context['concurrent_agents'])}"
         
         # CRITICAL: Add state data context for agent awareness
-        if situational_context.get("current_client"):
-            section += f"\nCURRENT CLIENT: {situational_context['current_client']}"
-            print(f"🔍 DEBUG: Added CURRENT CLIENT to situation section: {situational_context['current_client']}")
-            # Add explicit instruction for this specific client
-            section += f"\n🚨 CRITICAL: You MUST work with {situational_context['current_client']} ONLY. Do NOT use any other client names from conversation history."
+        current_client = situational_context.get("current_client")
+        if current_client is not None:  # Handle both specific client and None (all clients)
+            if current_client:  # Specific client
+                section += f"\nCURRENT CLIENT: {current_client}"
+                print(f"🔍 DEBUG: Added CURRENT CLIENT to situation section: {current_client}")
+                # Add explicit instruction for this specific client
+                section += f"\n🚨 CRITICAL: You MUST work with {current_client} ONLY. Do NOT use any other client names from conversation history."
+            else:  # None means "all clients"
+                section += f"\nCURRENT CLIENT: ALL CLIENTS"
+                print(f"🔍 DEBUG: Added CURRENT CLIENT to situation section: ALL CLIENTS")
+                # Add explicit instruction for all clients
+                section += f"\n🚨 CRITICAL: You MUST work with ALL CLIENTS. Do NOT filter by any specific client name."
         if situational_context.get("current_workflow"):
             section += f"\nCURRENT WORKFLOW: {situational_context['current_workflow']}"
         if situational_context.get("current_contract_id"):
@@ -494,7 +501,9 @@ Contract listing (get_client_contracts) → ONLY when user asks to "list/show co
 - If USER OPERATION = "get_contracts_with_null_billing" → Call get_contracts_with_null_billing tool  
 - If USER OPERATION = "get_contracts_by_amount" → Call get_contracts_by_amount tool
 - NEVER call get_all_clients_with_contracts when USER OPERATION is a specific billing tool
+- NEVER call get_client_contracts when USER OPERATION is a specific billing tool
 - ALWAYS use the exact tool name from USER OPERATION
+- IGNORE tool descriptions when USER OPERATION is specified - use the exact tool name
 
 
 **TOOL MAPPING:**
@@ -712,6 +721,8 @@ You are Milo, an expert assistant for contract management. Current date: {curren
 - NEVER use client names from conversation history when CURRENT CLIENT is specified
 - If you see "CURRENT CLIENT: [ClientName]" in the situation section, ALL your tool calls MUST use that exact client name
 - Do NOT make tool calls for different clients even if they appear in conversation history
+- When CURRENT CLIENT changes between messages, IMMEDIATELY switch to the new client
+- NEVER retain previous client context when a new client is mentioned
 
 🚨🚨🚨 CRITICAL: CONTRACT CREATION vs UPDATE 🚨🚨🚨
 - "Create contract" → ALWAYS use create_contract (NEVER update_contract)
@@ -758,6 +769,12 @@ Clients → update_client, create_client_and_contract (for new client + contract
 ❌ NEVER use update_client when "contract" is mentioned
 ❌ NEVER call get_client_contracts if user already specified what to update/delete
 ✅ ONLY call get_client_contracts for "show/list contracts" OR when multiple contracts need disambiguation for UPDATE/DELETE operations (NEVER for CREATE)
+
+🚨 DELETE CONTRACT DOCUMENT FLOW:
+- When user says "delete contract document for [client]" → Call delete_contract_document WITHOUT contract_id to show list first
+- Wait for user to specify which contract ID to delete
+- NEVER call delete_contract_document with specific contract_id unless user explicitly provided it
+- ALWAYS show the contract list first when no specific contract is mentioned
 
 🔒 CRITICAL OPERATION GUIDELINES
 DECISION RULES

@@ -161,6 +161,14 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                         message=f"❌ Contract with ID {params.contract_id} not found."
                     )
                 
+                # If client_name is provided, validate that the contract belongs to that client
+                if params.client_name:
+                    if contract.client.client_name.lower() != params.client_name.lower():
+                        return ContractToolResult(
+                            success=False,
+                            message=f"❌ Contract {params.contract_id} belongs to '{contract.client.client_name}', not '{params.client_name}'. Please specify the correct client."
+                        )
+                
                 # Update the specific contract
                 return await update_specific_contract(contract, params, session)
             
@@ -1889,7 +1897,7 @@ async def delete_contract_document_tool(params: DeleteContractDocumentParams) ->
                     
                     return ContractToolResult(
                         success=False,
-                        message=f"🔍 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + "\n\nPlease specify which contract ID you want to delete the document for (e.g., 'delete contract document for {client.client_name} contract {contracts[0].contract_id}')"
+                        message=f"🔍 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to delete the document for (e.g., 'delete contract document for {client.client_name} contract {contracts[0].contract_id}')"
                     )
             
             # Delete documents

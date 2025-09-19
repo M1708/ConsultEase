@@ -340,12 +340,12 @@ class ContractAgent:
                 "type": "function",
                 "function": {
                     "name": "delete_contract_document",
-                    "description": "Delete contract document(s) for a client. Can delete all documents for a client or specific contract document.",
+                    "description": "Delete contract document(s) for a client. If no contract_id provided, will show contract list for user to choose. If contract_id provided, will delete that specific contract's document.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "client_name": {"type": "string", "description": "Name of the client"},
-                            "contract_id": {"type": "integer", "description": "Specific contract ID (optional - will delete all contract documents if not provided)"}
+                            "contract_id": {"type": "integer", "description": "Specific contract ID (optional - will show contract list if not provided)"}
                         },
                         "required": ["client_name"]
                     }
