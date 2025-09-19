@@ -97,9 +97,9 @@ class FuzzyClientMatcher:
                         exact_match = await session.execute(
                             select(Client).where(func.lower(Client.client_name) == name.lower())
                         )
-                        exact_client = exact_match.scalar_one_or_none()
-                        if exact_client:
-                            matching_clients.append(exact_client)
+                        exact_clients = exact_match.scalars().all()
+                        if exact_clients:
+                            matching_clients.extend(exact_clients)
                             continue
                     except Exception as e:
                         print(f"🔍 DEBUG: Exact match failed for '{name}': {e}")

@@ -264,7 +264,24 @@ class EnhancedRoutingLogic:
         if operation_type == "update" and any(word in message_lower for word in ["billing", "contract", "amount", "date"]):
             adjusted_scores["contract_agent"] += 3.0
         
-        # Adjustment 3: Person name context (Agentic approach - let agent reason about context)
+        # Adjustment 3: Delete operations - route to contract agent for delete operations
+        if operation_type == "delete":
+            if "client" in message_lower and "delete" in message_lower:
+                # Delete client operations should go to contract agent
+                adjusted_scores["contract_agent"] += 10.0
+                adjusted_scores["client_agent"] = 0.0
+            elif "contract" in message_lower and "delete" in message_lower:
+                # Delete contract operations should go to contract agent
+                adjusted_scores["contract_agent"] += 10.0
+                adjusted_scores["client_agent"] = 0.0
+        
+        # Adjustment 3.5: Contracts with documents - route to contract agent
+        if "contract" in message_lower and "document" in message_lower:
+            # Contracts with documents operations should go to contract agent
+            adjusted_scores["contract_agent"] += 10.0
+            adjusted_scores["client_agent"] = 0.0
+        
+        # Adjustment 4: Person name context (Agentic approach - let agent reason about context)
         person_names = self._extract_person_names(original_message)
         if person_names:
             # TODO: Make this more agentic - let the agent reason about person vs company context

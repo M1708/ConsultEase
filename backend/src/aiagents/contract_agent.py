@@ -304,6 +304,23 @@ class ContractAgent:
             {
                 "type": "function",
                 "function": {
+                    "name": "get_contracts_with_documents",
+                    "description": "Get contracts that have documents uploaded. Use this when user asks for 'contracts with documents', 'contracts that have files uploaded', or similar requests. Can filter by specific client or return all contracts with documents.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {
+                                "type": "string", 
+                                "description": "Optional. Filter contracts by specific client name. If not provided, returns all contracts with documents."
+                            }
+                        },
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "upload_contract_document",
                     "description": "Upload a document for a client's contract. Handles file upload and database updates. If client has multiple contracts, will ask user to specify contract ID. CRITICAL: Always extract client name from user message - look for patterns like 'for client [Name]', 'for [Name]', 'this is for [Name]'. IMPROVED: Enhanced parameter validation and file data handling to prevent upload failures.",
                     "parameters": {
@@ -363,6 +380,22 @@ class ContractAgent:
                             "contract_id": {"type": "integer", "description": "Specific contract ID (optional - will ask for clarification if multiple contracts exist)"},
                             "delete_all": {"type": "boolean", "description": "Set to true to delete all contracts for the client (use when user says 'all')"},
                             "user_response": {"type": "string", "description": "User's response to contract selection prompt (e.g., '1', '2', 'all')"}
+                        },
+                        "required": ["client_name"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_client",
+                    "description": "Delete a client and all associated contracts and documents. If client has contracts, will show confirmation with contract details. User can respond with 'yes', 'ok', 'alright', etc. to confirm. If user says 'delete client X and all contracts', will skip confirmation.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {"type": "string", "description": "Name of the client to delete"},
+                            "confirm_deletion": {"type": "boolean", "description": "Set to true to skip confirmation (internal use)"},
+                            "user_response": {"type": "string", "description": "User's response to confirmation prompt (e.g., 'yes', 'ok', 'alright', 'go ahead')"}
                         },
                         "required": ["client_name"]
                     }

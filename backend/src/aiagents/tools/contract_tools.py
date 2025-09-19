@@ -621,10 +621,28 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                             amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
                             status = c.status.lower()
                             start_date = str(c.start_date) if c.start_date else "Not set"
-                            contract_list.append(f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})")
+                            
+                            # Check if contract has existing document
+                            document_info = ""
+                            if c.document_filename:
+                                file_size_mb = c.document_file_size / (1024 * 1024) if c.document_file_size else 0
+                                file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{c.document_file_size} bytes"
+                                uploaded_date = c.document_uploaded_at.strftime('%B %d, %Y') if c.document_uploaded_at else "N/A"
+                                
+                                # Create download URL for existing document
+                                storage_service = SupabaseStorageService()
+                                download_url = storage_service.get_contract_document_url(c.document_file_path) if c.document_file_path else f"/contracts/{c.contract_id}/document"
+                                
+                                document_info = f" 📄 *Has document: [{c.document_filename}]({download_url}) ({file_size_display}, uploaded {uploaded_date})*"
+                            
+                            contract_list.append(f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date}){document_info}")
 
+                        # Check if any contracts have existing documents
+                        has_existing_documents = any(c.document_filename for c in contracts)
+                        overwrite_warning = "\n\n⚠️ **Note:** If a contract already has a document, uploading a new document will overwrite the existing one." if has_existing_documents else ""
+                        
                         # Create the response
-                        response_message = f"📋 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to upload the document for (e.g., \"upload document for {client.client_name} contract {contracts[0].contract_id}\")."
+                        response_message = f"📋 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to upload the document for (e.g., \"upload document for {client.client_name} contract {contracts[0].contract_id}\").{overwrite_warning}"
                         
                         return ContractToolResult(
                             success=False,
@@ -635,6 +653,35 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
         if contract or len(contracts) == 1:
             if not contract:
                 contract = contracts[0]
+            
+            # Check if contract already has a document
+            if contract.document_filename:
+                # Show existing document information
+                existing_file_size_mb = contract.document_file_size / (1024 * 1024) if contract.document_file_size else 0
+                existing_file_size_display = f"{existing_file_size_mb:.2f} MB" if existing_file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                
+                # Create download URL for existing document
+                storage_service = SupabaseStorageService()
+                existing_download_url = storage_service.get_contract_document_url(contract.document_file_path) if contract.document_file_path else f"/contracts/{contract.contract_id}/document"
+                
+                existing_message = f"📄 **Contract {contract.contract_id} already has a document uploaded:**\n\n- **Filename:** [{contract.document_filename}]({existing_download_url})\n- **File Size:** {existing_file_size_display}\n- **Uploaded At:** {contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else 'N/A'}\n\n⚠️ **Uploading a new document will replace the existing one.**\n\nProceeding with upload..."
+                
+                # Return the existing document info first
+                return ContractToolResult(
+                    success=True,
+                    message=existing_message,
+                    data={
+                        "contract_id": contract.contract_id,
+                        "client_name": contract.client.client_name,
+                        "existing_document": {
+                            "filename": contract.document_filename,
+                            "file_size": contract.document_file_size,
+                            "file_size_display": existing_file_size_display,
+                            "uploaded_at": contract.document_uploaded_at.isoformat() if contract.document_uploaded_at else None,
+                            "download_url": existing_download_url
+                        }
+                    }
+                )
             
             # Upload document using storage service
             storage_service = SupabaseStorageService()
@@ -2115,13 +2162,32 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
     """Delete a client and all associated contracts and documents"""
     try:
         async with get_ai_db() as session:
-            # Get client
-            client = await get_client_by_name(params.client_name, session)
+            # Get client - handle multiple results gracefully
+            try:
+                client = await get_client_by_name(params.client_name, session)
+            except Exception as e:
+                # If there's a database error (like multiple results), treat as client not found
+                print(f"Database error in delete_client_tool: {e}")
+                client = None
+            
             if not client:
-                return ContractToolResult(
-                    success=False,
-                    message=f"❌ Client '{params.client_name}' not found"
-                )
+                # Check if user is confirming deletion of non-existent client
+                confirmation_keywords = ['yes', 'y', 'confirm', 'ok', 'okay', 'alright', 'go ahead', 'proceed', 'delete', 'sure']
+                user_confirmed = (params.user_response and 
+                                any(keyword in params.user_response.lower().strip() for keyword in confirmation_keywords))
+                
+                if user_confirmed:
+                    # User confirmed deletion of non-existent client
+                    return ContractToolResult(
+                        success=False,
+                        message=f"❌ Client '{params.client_name}' not found"
+                    )
+                else:
+                    # Show warning for non-existent client
+                    return ContractToolResult(
+                        success=True,
+                        message=f"⚠️ **WARNING: You are about to delete client '{params.client_name}'**\n\n**Note:** This client does not exist in the system.\n\n**This action will permanently delete:**\n- All associated contracts (if any)\n- All contract documents\n- All client contact information\n- All billing history\n\n**Respond with 'yes', 'ok', 'alright', or 'go ahead' to confirm deletion.**"
+                    )
             
             # Get all contracts for this client
             contracts_result = await session.execute(
@@ -2132,24 +2198,52 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
             contracts = contracts_result.scalars().all()
             
             # Check if user is confirming with "yes" or similar responses
-            if params.user_response and params.user_response.lower().strip() in ['yes', 'y', 'confirm', 'ok', 'proceed', 'delete']:
+            confirmation_keywords = ['yes', 'y', 'confirm', 'ok', 'okay', 'alright', 'go ahead', 'proceed', 'delete', 'sure']
+            user_confirmed = (params.user_response and 
+                            any(keyword in params.user_response.lower().strip() for keyword in confirmation_keywords))
+            
+            # Check if user explicitly said to delete with contracts (skip confirmation)
+            skip_confirmation = ('and all' in params.client_name.lower() or 
+                               'and all its' in params.client_name.lower() or
+                               'and all contracts' in params.client_name.lower())
+            
+            if not contracts:
+                # No contracts, show confirmation first
+                if user_confirmed or skip_confirmation or params.confirm_deletion:
+                    # User confirmed, proceed with deletion
+                    pass
+                else:
+                    return ContractToolResult(
+                        success=True,
+                        message=(
+                            f"⚠️ **Confirm deletion of client '{client.client_name}'**\n\n"
+                            f"**This will permanently delete:**\n"
+                            f"- All client contact information\n"
+                            f"- All billing history\n\n"
+                            f"Reply **yes/ok/alright/go ahead** to confirm, or **cancel** to abort."
+                        )
+                    )
+            elif user_confirmed or skip_confirmation or params.confirm_deletion:
                 # User confirmed, proceed with deletion
                 pass
-            elif not params.confirm_deletion:
+            else:
                 # Show confirmation with contract details
-                if not contracts:
-                    return ContractToolResult(
-                        success=False,
-                        message=f"❌ Client '{client.client_name}' has no contracts. Are you sure you want to delete this client?\n\n**Respond with 'yes' to confirm deletion.**"
-                    )
-                
                 contract_list = []
                 for c in contracts:
-                    contract_list.append(f"- Contract ID {c.contract_id}: {c.contract_type} (${c.original_amount:,.2f}) - {c.status}")
+                    amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
+                    contract_list.append(f"- **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {c.status}")
                 
                 return ContractToolResult(
-                    success=False,
-                    message=f"⚠️ **WARNING: This will permanently delete client '{client.client_name}' and ALL associated data!**\n\n**Contracts to be deleted ({len(contracts)}):**\n" + "\n".join(contract_list) + f"\n\n**This action will also delete:**\n- All contract documents\n- All client contact information\n- All billing history\n\n**Respond with 'yes' to confirm deletion.**"
+                    success=True,
+                    message=(
+                        f"⚠️ **Confirm deletion of client '{client.client_name}'**\n\n"
+                        f"**This will permanently delete:**\n"
+                        f"- {len(contracts)} contract(s) and their documents\n"
+                        f"- All client contact information\n"
+                        f"- All billing history\n\n"
+                        f"**Contracts to be deleted:**\n" + "\n".join(contract_list) + "\n\n"
+                        f"Reply **yes/ok/alright/go ahead** to confirm, or **cancel** to abort."
+                    )
                 )
             
             # Proceed with deletion
@@ -2195,11 +2289,108 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
             
             return ContractToolResult(
                 success=True,
-                message=f"✅ Successfully deleted client **{client.client_name}** and all associated data:\n- {deleted_contracts} contract(s)\n- {deleted_documents} document(s)\n- {deleted_contacts} contact(s)"
+                message=f"✅ Successfully deleted client **{client.client_name}** and all associated data:\n- {deleted_contracts} contract(s)\n- {deleted_documents} document(s)\n- {deleted_contacts} contact(s)"                              
             )
                 
     except Exception as e:
         return ContractToolResult(
             success=False,
             message=f"❌ Failed to delete client: {str(e)}"
+        )
+
+
+async def get_contracts_with_documents_tool(params: SearchContractsParams, context: Dict[str, Any]) -> ContractToolResult:
+    """Get contracts that have documents uploaded for a specific client or all clients"""
+    try:
+        async with get_ai_db() as session:
+            # Build query for contracts with documents
+            query = select(Contract).options(
+                selectinload(Contract.client)
+            ).filter(
+                Contract.document_filename.isnot(None),
+                Contract.document_filename != ""
+            )
+            
+            # Filter by client if specified
+            if params.client_name:
+                client = await get_client_by_name(params.client_name, session)
+                if not client:
+                    return ContractToolResult(
+                        success=False,
+                        message=f"❌ Client '{params.client_name}' not found."
+                    )
+                query = query.filter(Contract.client_id == client.client_id)
+            
+            # Execute query
+            result = await session.execute(query.order_by(Contract.created_at.desc()))
+            contracts = result.scalars().all()
+            
+            if not contracts:
+                client_msg = f" for client '{params.client_name}'" if params.client_name else ""
+                return ContractToolResult(
+                    success=True,
+                    message=f"📄 No contracts with uploaded documents found{client_msg}."
+                )
+            
+            # Format the results
+            contract_list = []
+            for contract in contracts:
+                # Format file size
+                file_size_mb = contract.document_file_size / (1024 * 1024) if contract.document_file_size else 0
+                file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                
+                # Format amount
+                amount = f"${contract.original_amount:,.2f}" if contract.original_amount else "N/A"
+                
+                # Format dates
+                start_date = contract.start_date.strftime('%B %d, %Y') if contract.start_date else "Not set"
+                uploaded_date = contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else "N/A"
+                
+                contract_info = f"**Contract ID {contract.contract_id}** - {contract.client.client_name}\n"
+                contract_info += f"- **Type:** {contract.contract_type}\n"
+                contract_info += f"- **Status:** {contract.status}\n"
+                contract_info += f"- **Amount:** {amount}\n"
+                contract_info += f"- **Start Date:** {start_date}\n"
+                
+                # Create download URL for document
+                storage_service = SupabaseStorageService()
+                download_url = storage_service.get_contract_document_url(contract.document_file_path) if contract.document_file_path else f"/contracts/{contract.contract_id}/document"
+                
+                contract_info += f"- **Document:** [{contract.document_filename}]({download_url})\n"
+                contract_info += f"- **File Size:** {file_size_display}\n"
+                contract_info += f"- **Uploaded:** {uploaded_date}\n"
+                
+                contract_list.append(contract_info)
+            
+            # Create response message
+            client_msg = f" for **{params.client_name}**" if params.client_name else ""
+            response_message = f"📄 **Contracts with uploaded documents{client_msg}:**\n\n" + "\n\n".join(contract_list)
+            
+            return ContractToolResult(
+                success=True,
+                message=response_message,
+                data={
+                    "contracts_with_documents": len(contracts),
+                    "client_name": params.client_name,
+                    "contracts": [
+                        {
+                            "contract_id": contract.contract_id,
+                            "client_name": contract.client.client_name,
+                            "contract_type": contract.contract_type,
+                            "status": contract.status,
+                            "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                            "start_date": contract.start_date.isoformat() if contract.start_date else None,
+                            "document_filename": contract.document_filename,
+                            "document_file_size": contract.document_file_size,
+                            "document_uploaded_at": contract.document_uploaded_at.isoformat() if contract.document_uploaded_at else None
+                        }
+                        for contract in contracts
+                    ]
+                }
+            )
+            
+    except Exception as e:
+        return ContractToolResult(
+            success=False,
+            message=f"❌ Failed to get contracts with documents: {str(e)}"
         )

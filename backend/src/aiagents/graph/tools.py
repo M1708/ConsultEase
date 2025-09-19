@@ -19,7 +19,7 @@ from src.aiagents.tools.contract_tools import (
     get_contract_details_tool, analyze_contract_tool, smart_create_contract_tool,
     smart_contract_document_tool, upload_contract_document_tool, delete_contract_document_tool, delete_contract_tool, delete_client_tool, get_contracts_by_client_tool, get_all_contracts_tool,
     get_all_clients_with_contracts_tool, get_contracts_by_billing_date_tool, update_contract_tool, 
-    search_contracts_tool, get_contracts_for_next_month_billing_tool, get_contracts_with_null_billing_tool, get_contracts_by_amount_tool,
+    search_contracts_tool, get_contracts_for_next_month_billing_tool, get_contracts_with_null_billing_tool, get_contracts_by_amount_tool, get_contracts_with_documents_tool,
     CreateClientParams, SmartContractParams, ContractDocumentParams, UploadContractDocumentParams, DeleteContractDocumentParams, DeleteContractParams, DeleteClientParams, UpdateContractParams, SearchContractsParams, ContractToolResult
 )
 from  src.aiagents.tools.client_tools import (
@@ -92,17 +92,25 @@ async def _smart_create_contract_wrapper(**kwargs) -> Dict[str, Any]:
             kwargs['contract_type'] = 'Fixed'  # Default fallback
     
     params = SmartContractParams(**kwargs)
+    print(f"🔍 DEBUG: _smart_create_contract_wrapper - creating contract for client: {kwargs.get('client_name')}")
     result = await smart_create_contract_tool(params, context)
+    print(f"🔍 DEBUG: _smart_create_contract_wrapper - base tool result: success={getattr(result, 'success', None)}")
     
     # If successful, enhance the response with comprehensive details
-    if result.success and result.data:
+    if result and getattr(result, 'success', False) and getattr(result, 'data', None):
         contract_data = result.data
+        print(f"🔍 DEBUG: _smart_create_contract_wrapper - contract_data keys: {list(contract_data.keys())}")
         
         # Get additional client information for context
         try:
             async with get_ai_db() as session:
             # Get the created contract for full details
                 contract_id = contract_data.get('contract_id')
+                if not contract_id:
+                    # Sometimes contract_id is nested or typed as str in base tool
+                    nested_id = (contract_data.get('contract', {}) or {}).get('contract_id')
+                    contract_id = nested_id or contract_id
+                print(f"🔍 DEBUG: _smart_create_contract_wrapper - resolved contract_id: {contract_id}")
                 if contract_id:
                 # Fetch contract
                     contract_stmt = select(Contract).where(Contract.contract_id == contract_id)
@@ -155,6 +163,7 @@ async def _smart_create_contract_wrapper(**kwargs) -> Dict[str, Any]:
                             }
                         }
                         
+                        print(f"🔍 DEBUG: _smart_create_contract_wrapper - returning enhanced payload with contract_id={contract.contract_id}")
                         return {
                             "success": True,
                             "message": f"✅ Successfully created contract for '{client.client_name}'. Contract ID: {contract.contract_id}",
@@ -163,9 +172,15 @@ async def _smart_create_contract_wrapper(**kwargs) -> Dict[str, Any]:
         except Exception as e:
             # If enhancement fails, fall back to original response but log the error
             print(f"Warning: Could not enhance contract response: {str(e)}")
-    
     # Return original response if enhancement fails or if not successful
-    
+    try:
+        fallback = result.model_dump()
+        print(f"🔍 DEBUG: _smart_create_contract_wrapper - returning fallback payload (not enhanced)")
+        return fallback
+    except Exception:
+        # Last resort
+        print("❌ DEBUG: _smart_create_contract_wrapper - no valid result to return, returning error")
+        return {"success": False, "message": "Failed to create contract", "data": None}
 
 async def _get_contracts_by_client_wrapper(**kwargs) -> Dict[str, Any]:
     kwargs.pop('db', None)
@@ -240,6 +255,16 @@ async def _get_contracts_by_amount_wrapper(**kwargs) -> Dict[str, Any]:
     result = await get_contracts_by_amount_tool(min_amount=min_amount, max_amount=max_amount, client_name=client_name, context=context)
     return result.model_dump()
 
+async def _get_contracts_with_documents_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
+    context = kwargs.pop('context', None)
+    client_name = kwargs.pop('client_name', None)
+    if context is None:
+        context = {}
+    params = SearchContractsParams(client_name=client_name)
+    result = await get_contracts_with_documents_tool(params, context)
+    return result.model_dump()
+
 
 async def _update_client_wrapper(**kwargs) -> Dict[str, Any]:
     kwargs.pop('db', None)
@@ -268,43 +293,57 @@ async def _upload_contract_document_wrapper(**kwargs) -> Dict[str, Any]:
     print(f"🔍 DEBUG: upload_contract_document_wrapper - context has file_info: {context and 'file_info' in context}")
 
     # ENHANCED PARAMETER HANDLING: Better file data replacement and validation
-    if context and 'file_info' in context:
-        file_info = context['file_info']
+    file_info = (context or {}).get('file_info')
 
+    # Gracefully handle the case when the user didn't upload a file
+    if (not file_info) and (
+        not kwargs.get('file_data') or kwargs.get('file_data') in ["<base64_encoded_data>", "[USE_ACTUAL_FILE_DATA_FROM_CONTEXT]"]
+    ):
+        # Only the client name is required to start the flow; ask user to attach file
+        if not kwargs.get('client_name'):
+            return {
+                "success": False,
+                "message": "❌ Please specify the client name to upload a document for.",
+                "data": None
+            }
+        return {
+            "success": False,
+            "message": (
+                "📎 **No document attached.**\n\n"
+                "To upload a contract document, please:\n"
+                "1. Use the file upload button to attach your document\n"
+                "2. Or drag and drop the file into the chat\n"
+                "3. Then send your message again\n\n"
+                "Example: 'upload contract document for {client_name}' with a file attached."
+            ).format(client_name=kwargs.get('client_name')),
+            "data": None
+        }
+
+    if file_info:
         # Replace placeholders with actual file data from context
-        if kwargs.get('file_data') == "<base64_encoded_data>":
+        if kwargs.get('file_data') in ["<base64_encoded_data>", "[USE_ACTUAL_FILE_DATA_FROM_CONTEXT]"] or not kwargs.get('file_data'):
             kwargs['file_data'] = file_info.get('file_data')
             kwargs['filename'] = file_info.get('filename', kwargs.get('filename'))
             kwargs['file_size'] = file_info.get('file_size', kwargs.get('file_size'))
             kwargs['mime_type'] = file_info.get('mime_type', kwargs.get('mime_type'))
 
-        # Ensure all required parameters are present (except placeholders)
-        required_params = ['client_name']
-        missing_params = [param for param in required_params if not kwargs.get(param)]
+    # Ensure required params
+    required_params = ['client_name']
+    missing_params = [param for param in required_params if not kwargs.get(param)]
+    if missing_params:
+        return {
+            "success": False,
+            "message": f"❌ Missing required parameters: {', '.join(missing_params)}.",
+            "data": None
+        }
 
-        if missing_params:
-            return {
-                "success": False,
-                "message": f"❌ Missing required parameters: {', '.join(missing_params)}. Please extract the client name from the user's message.",
-                "data": None
-            }
-            
-        # Check if we have file_info but no actual file data
-        if not kwargs.get('file_data') or kwargs.get('file_data') == "<base64_encoded_data>":
-            if not (context and 'file_info' in context):
-                return {
-                    "success": False,
-                    "message": "❌ No file was uploaded with this message. Please use the file upload feature to attach a document.",
-                    "data": None
-                }
-
-        # Validate file data format
-        if kwargs.get('file_data') and not isinstance(kwargs['file_data'], str):
-            return {
-                "success": False,
-                "message": "❌ File data must be a base64 encoded string",
-                "data": None
-            }
+    # Validate file data format if present
+    if kwargs.get('file_data') and not isinstance(kwargs['file_data'], str):
+        return {
+            "success": False,
+            "message": "❌ File data must be a base64 encoded string",
+            "data": None
+        }
 
     params = UploadContractDocumentParams(**kwargs)
     result = await upload_contract_document_tool(params, context)
@@ -1046,6 +1085,7 @@ TOOL_REGISTRY = {
     "get_contracts_for_next_month_billing": _get_contracts_for_next_month_billing_wrapper,
     "get_contracts_with_null_billing": _get_contracts_with_null_billing_wrapper,
     "get_contracts_by_amount": _get_contracts_by_amount_wrapper,
+    "get_contracts_with_documents": _get_contracts_with_documents_wrapper,
     "update_client": _update_client_wrapper,
     "manage_contract_document": _smart_contract_document_wrapper,
     "upload_contract_document": _upload_contract_document_wrapper,
@@ -1285,7 +1325,7 @@ def validate_and_correct_tool(tool_name: str, state: AgentState) -> str:
     # Define allowed tools for each workflow
     ALLOWED_TOOLS = {
         'update': ['update_contract', 'update_contract_by_id'],
-        'delete': ['delete_contract', 'delete_contract_document'],
+        'delete': ['delete_contract', 'delete_contract_document', 'delete_client'],
         'create': ['create_contract', 'create_client_and_contract', 'create_client', 'upload_contract_document'],
         'upload': ['get_client_contracts', 'upload_contract_document'],
         'show': ['get_contracts_by_client', 'get_client_details', 'get_contract_details'],

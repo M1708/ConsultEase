@@ -757,6 +757,12 @@ class EnhancedAgentNodeExecutor:
             user_operation == 'upload_contract_document'):
             print(f"🔍 DEBUG: Short-circuiting for initial file upload - calling upload_contract_document directly")
             return True
+        
+        # Short-circuit for file uploads when contract_id is provided (user selected contract)
+        if (has_user_operation and has_client and has_file_info and has_contract_id and
+            user_operation == 'upload_contract_document'):
+            print(f"🔍 DEBUG: Short-circuiting for contract ID upload - calling upload_contract_document directly")
+            return True
         else:
             print(f"🔍 DEBUG: File upload short-circuit conditions NOT met")
 

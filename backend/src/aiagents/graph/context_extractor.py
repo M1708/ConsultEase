@@ -182,15 +182,8 @@ class ContextExtractor:
                 return None
         except Exception as e:
             print(f"🔍 DEBUG: Error in fuzzy client matching: {e}")
-            # Fallback: try simple text matching for common patterns
-            if 'sangard' in text.lower():
-                return 'Sangard Corp'
-            elif 'innovatetech' in text.lower():
-                return 'InnovateTech Solutions'
-            elif 'tech corp' in text.lower():
-                return 'Tech Corp'
-            else:
-                return None
+            # No fallback patterns - let the fuzzy matcher handle all cases
+            return None
     
     def _extract_workflow(self, text: str) -> Optional[str]:
         """Extract workflow/operation from text."""
@@ -240,9 +233,19 @@ class ContextExtractor:
     def _extract_operation_type(self, text: str) -> str:
         """Extract the specific tool operation from the user message."""
         text_lower = text.lower()
+        print(f"🔍 DEBUG: _extract_operation_type - text: '{text}'")
+        print(f"🔍 DEBUG: _extract_operation_type - text_lower: '{text_lower}'")
         
         # Billing-specific operations (check these first for priority)
-        if ('billing' in text_lower or 'upcoming' in text_lower) and 'contract' in text_lower:
+        # Only detect billing operations if it's clearly a query, not a create operation
+        has_billing = 'billing' in text_lower or 'upcoming' in text_lower
+        has_contract = 'contract' in text_lower
+        has_create = 'create' in text_lower or 'new' in text_lower
+        
+        print(f"🔍 DEBUG: _extract_operation_type - has_billing: {has_billing}, has_contract: {has_contract}, has_create: {has_create}")
+        
+        if has_billing and has_contract and not has_create:
+            print(f"🔍 DEBUG: _extract_operation_type - detected billing operation")
             if ('not set' in text_lower or 'null' in text_lower or 'no billing' in text_lower or 
                 'no next billing' in text_lower or 'billing prompt date not set' in text_lower):
                 return 'get_contracts_with_null_billing'
@@ -250,26 +253,35 @@ class ContextExtractor:
                 return 'get_contracts_for_next_month_billing'
         elif 'amount' in text_lower and ('more than' in text_lower or 'greater than' in text_lower) and 'contract' in text_lower:
             return 'get_contracts_by_amount'
+        elif ('document' in text_lower or 'file' in text_lower) and 'contract' in text_lower and ('uploaded' in text_lower or 'have' in text_lower):
+            return 'get_contracts_with_documents'
+        elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'contract' in text_lower and 'document' in text_lower:
+            return 'get_contracts_with_documents'
+        
+        # Client operations (check these first to avoid conflicts with contract operations)
+        elif 'update' in text_lower and 'client' in text_lower:
+            return 'update_client'
+        elif 'create' in text_lower and 'client' in text_lower:
+            return 'create_client'
+        elif 'delete' in text_lower and 'client' in text_lower:
+            return 'delete_client'
+        elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'client' in text_lower:
+            return 'get_client_details'
         
         # Contract operations
         elif ('update' in text_lower or 'change' in text_lower or 'modify' in text_lower) and 'contract' in text_lower:
+            print(f"🔍 DEBUG: _extract_operation_type - detected update_contract")
             return 'update_contract'
         elif 'delete' in text_lower and 'contract' in text_lower:
+            print(f"🔍 DEBUG: _extract_operation_type - detected delete_contract")
             return 'delete_contract'
         elif 'create' in text_lower and 'contract' in text_lower:
+            print(f"🔍 DEBUG: _extract_operation_type - detected create_contract")
             return 'create_contract'
         elif 'upload' in text_lower and 'contract' in text_lower:
             return 'upload_contract_document'
         elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'contract' in text_lower:
             return 'get_contracts_by_client'
-        
-        # Client operations
-        elif 'update' in text_lower and 'client' in text_lower:
-            return 'update_client'
-        elif 'create' in text_lower and 'client' in text_lower:
-            return 'create_client'
-        elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'client' in text_lower:
-            return 'get_client_details'
         
         # Fallback to generic operations
         elif 'update' in text_lower:
