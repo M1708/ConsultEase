@@ -455,7 +455,44 @@ async def _create_client_and_contract_wrapper(**kwargs) -> Dict[str, Any]:
             
             if document_result:
                 if document_result.success:
-                    success_message += f"\n\n📄 **Document uploaded successfully:** {document_result.data.get('document_filename', 'Unknown')}"
+                    # Format document details similar to upload_contract_document_tool
+                    document_filename = document_result.data.get('document_filename', 'Unknown')
+                    download_url = document_result.data.get('document_download_url', '#')
+                    file_size = document_result.data.get('document_file_size', 'Unknown')
+                    uploaded_at = document_result.data.get('document_uploaded_at', 'N/A')
+                    
+                    # Format file size display
+                    if file_size and file_size != 'Unknown':
+                        try:
+                            size_bytes = int(file_size)
+                            if size_bytes < 1024:
+                                file_size_display = f"{size_bytes} B"
+                            elif size_bytes < 1024 * 1024:
+                                file_size_display = f"{size_bytes / 1024:.1f} KB"
+                            else:
+                                file_size_display = f"{size_bytes / (1024 * 1024):.1f} MB"
+                        except (ValueError, TypeError):
+                            file_size_display = file_size
+                    else:
+                        file_size_display = "Unknown"
+                    
+                    # Format upload date
+                    if uploaded_at and uploaded_at != 'N/A':
+                        try:
+                            from datetime import datetime
+                            if isinstance(uploaded_at, str):
+                                # Parse the date string if needed
+                                upload_date = datetime.fromisoformat(uploaded_at.replace('Z', '+00:00'))
+                            else:
+                                upload_date = uploaded_at
+                            formatted_date = upload_date.strftime('%B %d, %Y, %I:%M %p')
+                        except:
+                            formatted_date = str(uploaded_at)
+                    else:
+                        formatted_date = 'N/A'
+                    
+                    # Create document details section similar to upload_contract_document_tool
+                    success_message += f"\n\n📄 **Document Details:**\n- **Filename:** [{document_filename}]({download_url})\n- **File Size:** {file_size_display}\n- **Contract ID:** {contract_data.get('contract_id')}\n- **Uploaded At:** {formatted_date}"
                 else:
                     success_message += f"\n\n⚠️ **Document upload failed:** {document_result.message}"
             

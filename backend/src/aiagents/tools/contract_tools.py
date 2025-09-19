@@ -626,8 +626,11 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                             # Check if contract has existing document
                             document_info = ""
                             if c.document_filename:
-                                file_size_mb = c.document_file_size / (1024 * 1024) if c.document_file_size else 0
-                                file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{c.document_file_size} bytes"
+                                if c.document_file_size and c.document_file_size > 0:
+                                    file_size_mb = c.document_file_size / (1024 * 1024)
+                                    file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{c.document_file_size} bytes"
+                                else:
+                                    file_size_display = "Unknown"
                                 uploaded_date = c.document_uploaded_at.strftime('%B %d, %Y') if c.document_uploaded_at else "N/A"
                                 
                                 # Create download URL for existing document
@@ -658,8 +661,11 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
             # Check if contract already has a document
             if contract.document_filename:
                 # Show existing document information
-                existing_file_size_mb = contract.document_file_size / (1024 * 1024) if contract.document_file_size else 0
-                existing_file_size_display = f"{existing_file_size_mb:.2f} MB" if existing_file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                if contract.document_file_size and contract.document_file_size > 0:
+                    existing_file_size_mb = contract.document_file_size / (1024 * 1024)
+                    existing_file_size_display = f"{existing_file_size_mb:.2f} MB" if existing_file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                else:
+                    existing_file_size_display = "Unknown"
                 
                 # Create download URL for existing document
                 storage_service = SupabaseStorageService()
@@ -759,8 +765,11 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                 await session.commit()
                 
                 # Format file size for display
-                file_size_mb = contract.document_file_size / (1024 * 1024) if contract.document_file_size else 0
-                file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                if contract.document_file_size and contract.document_file_size > 0:
+                    file_size_mb = contract.document_file_size / (1024 * 1024)
+                    file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                else:
+                    file_size_display = "Unknown"
                 
                 # Create download URL - use signed URL from storage service
                 file_path = upload_result.get("file_path")
@@ -2225,7 +2234,7 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
                             f"**This will permanently delete:**\n"
                             f"- All client contact information\n"
                             f"- All billing history\n\n"
-                            f"Reply **yes**, **ok**, **alright**, or **go ahead** to confirm, or **cancel** to abort."
+                            f"Type 'yes' to confirm deletion or 'no' to cancel."
                         )
                     )
             else:
@@ -2249,7 +2258,7 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
                             f"- All client contact information\n"
                             f"- All billing history\n\n"
                             f"**Contracts to be deleted:**\n" + "\n".join(contract_list) + "\n\n"
-                            f"Reply **yes**, **ok**, **alright**, or **go ahead** to confirm, or **cancel** to abort."
+                            f"Type 'yes' to confirm deletion or 'no' to cancel."
                         )
                     )
             
@@ -2343,8 +2352,11 @@ async def get_contracts_with_documents_tool(params: SearchContractsParams, conte
             contract_list = []
             for contract in contracts:
                 # Format file size
-                file_size_mb = contract.document_file_size / (1024 * 1024) if contract.document_file_size else 0
-                file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                if contract.document_file_size and contract.document_file_size > 0:
+                    file_size_mb = contract.document_file_size / (1024 * 1024)
+                    file_size_display = f"{file_size_mb:.2f} MB" if file_size_mb >= 1 else f"{contract.document_file_size} bytes"
+                else:
+                    file_size_display = "Unknown"
                 
                 # Format amount
                 amount = f"${contract.original_amount:,.2f}" if contract.original_amount else "N/A"
