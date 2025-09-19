@@ -19,7 +19,7 @@ from src.aiagents.tools.contract_tools import (
     get_contract_details_tool, analyze_contract_tool, smart_create_contract_tool,
     smart_contract_document_tool, upload_contract_document_tool, delete_contract_document_tool, delete_contract_tool, delete_client_tool, get_contracts_by_client_tool, get_all_contracts_tool,
     get_all_clients_with_contracts_tool, get_contracts_by_billing_date_tool, update_contract_tool, 
-    search_contracts_tool, get_contracts_for_next_month_billing_tool,
+    search_contracts_tool, get_contracts_for_next_month_billing_tool, get_contracts_with_null_billing_tool, get_contracts_by_amount_tool,
     CreateClientParams, SmartContractParams, ContractDocumentParams, UploadContractDocumentParams, DeleteContractDocumentParams, DeleteContractParams, DeleteClientParams, UpdateContractParams, SearchContractsParams, ContractToolResult
 )
 from  src.aiagents.tools.client_tools import (
@@ -218,6 +218,26 @@ async def _get_contracts_for_next_month_billing_wrapper(**kwargs) -> Dict[str, A
         from datetime import date
         context = {'today': date.today()}
     result = await get_contracts_for_next_month_billing_tool(client_name=client_name, context=context)
+    return result.model_dump()
+
+async def _get_contracts_with_null_billing_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
+    context = kwargs.pop('context', None)
+    client_name = kwargs.pop('client_name', None)
+    if context is None:
+        context = {}
+    result = await get_contracts_with_null_billing_tool(client_name=client_name, context=context)
+    return result.model_dump()
+
+async def _get_contracts_by_amount_wrapper(**kwargs) -> Dict[str, Any]:
+    kwargs.pop('db', None)
+    context = kwargs.pop('context', None)
+    client_name = kwargs.pop('client_name', None)
+    min_amount = kwargs.pop('min_amount', None)
+    max_amount = kwargs.pop('max_amount', None)
+    if context is None:
+        context = {}
+    result = await get_contracts_by_amount_tool(min_amount=min_amount, max_amount=max_amount, client_name=client_name, context=context)
     return result.model_dump()
 
 
@@ -1024,6 +1044,8 @@ TOOL_REGISTRY = {
     "search_contracts": _search_contracts_wrapper,
     "update_contract": _update_contract_wrapper,
     "get_contracts_for_next_month_billing": _get_contracts_for_next_month_billing_wrapper,
+    "get_contracts_with_null_billing": _get_contracts_with_null_billing_wrapper,
+    "get_contracts_by_amount": _get_contracts_by_amount_wrapper,
     "update_client": _update_client_wrapper,
     "manage_contract_document": _smart_contract_document_wrapper,
     "upload_contract_document": _upload_contract_document_wrapper,
@@ -1058,38 +1080,25 @@ async def tool_executor_node(state: AgentState) -> Dict:
     Executes tools requested by an agent. This node is the central tool handler for the entire graph.
     It takes tool calls from the last message in the state, executes them, and returns the results.
     """
-    # 🚀 PERFORMANCE OPTIMIZATION: Track tool execution for contract search optimization
-
-    print(f"🔍 DEBUG: Tool executor called - state keys: {list(state.keys()) if isinstance(state, dict) else 'Not a dict'}")
-    print(f"🔍 DEBUG: Tool executor - messages count: {len(state.get('messages', []))}")
-
     last_message = state['messages'][-1]
     
     # Handle both dict messages (serialized) and object messages
     if isinstance(last_message, dict):
         tool_calls = last_message.get('tool_calls', [])
-        print(f"🔍 DEBUG: Tool executor - dict message, tool_calls: {len(tool_calls)}")
     else:
         tool_calls = getattr(last_message, 'tool_calls', [])
-        print(f"🔍 DEBUG: Tool executor - object message, tool_calls: {len(tool_calls)}")
-
-    print(f"🔍 DEBUG: Tool executor - tool calls found: {len(tool_calls)}")
 
     if not tool_calls:
-        print(f"🔍 DEBUG: Tool executor - no tool calls, returning empty messages")
         return {"messages": []}
 
     # The database session should be in the state's data payload, but context is in state.context
     #db_session = state.get('data', {}).get('database')
     context = state.get('context', {})
 
-    print(f"🔍 DEBUG: Tool executor - context keys: {list(context.keys()) if isinstance(context, dict) else 'Not a dict'}")
-
     results = []
     update_all_used = False  # Track if update_all=true has been used
     
     for i, tool_call in enumerate(tool_calls):
-        print(f"🔍 DEBUG: Tool executor - processing tool call {i}")
         
         # Handle both dict and object tool calls
         if isinstance(tool_call, dict):
@@ -1101,17 +1110,14 @@ async def tool_executor_node(state: AgentState) -> Dict:
             tool_call_id = tool_call.id
             arguments_str = tool_call.function.arguments
             
-        print(f"🔍 DEBUG: Tool executor - tool name: {tool_name}")
-        print(f"🔍 DEBUG: Tool executor - tool call id: {tool_call_id}")
+        print(f"🔍 TOOL: {tool_name}")
         
         # Skip redundant individual contract calls if update_all=true was already used
         if tool_name == 'update_contract':
             args = json.loads(arguments_str)
             if args.get('update_all') == True:
                 update_all_used = True
-                print(f"🔍 DEBUG: Tool executor - update_all=true detected, will skip individual contract calls")
             elif update_all_used and 'contract_id' in args:
-                print(f"🔍 DEBUG: Tool executor - skipping individual contract call {args.get('contract_id')} because update_all was already used")
                 continue
 
         if tool_name not in TOOL_REGISTRY:
@@ -1128,25 +1134,14 @@ async def tool_executor_node(state: AgentState) -> Dict:
                 tool_function = TOOL_REGISTRY[tool_name]
                 args = json.loads(arguments_str)
 
-                print(f"🔍 DEBUG: Tool executor - parsed arguments: {args}")
-
-                # Add the database session and context to the arguments for the wrapper
-                #args['db'] = db_session
-
                 # Enhance context with extracted context from state['data']
                 enhanced_context = context.copy() if context else {}
                 if 'data' in state and state['data']:
                     enhanced_context.update(state['data'])
 
-                print(f"🔍 DEBUG: Tool {tool_name} called with enhanced context")
-
                 args['context'] = enhanced_context
 
-                print(f"🔍 DEBUG: Tool executor - calling {tool_name}...")
-                if tool_name == "update_contract":
-                    print(f"🔍 FIELD EXTRACTION: About to call update_contract with context containing original_user_request: {enhanced_context.get('original_user_request', 'NOT_FOUND')}")
                 output = await tool_function(**args)
-                print(f"🔍 DEBUG: Tool executor - {tool_name} completed successfully")
 
                 # Handle JSON serialization with Decimal support
                 def json_serializer(obj):

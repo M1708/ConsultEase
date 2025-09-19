@@ -27,27 +27,35 @@ class HybridAgentOrchestrator:
 
     async def initialize_sdk_agents(self) -> bool:
         """Initialize OpenAI Agents SDK agents if available"""
+        print(f"🔍 SDK INIT: Checking SDK availability...")
+        
         if not self.agent_factory.is_sdk_available():
-            print("OpenAI Agents SDK not available, using fallback mode")
+            print("🔍 SDK INIT: OpenAI Agents SDK not available, using fallback mode")
             return False
 
         try:
             # Initialize core agents
             agent_types = ["contract_agent", "client_agent", "employee_agent"]
+            print(f"🔍 SDK INIT: Attempting to initialize {len(agent_types)} agent types")
 
             for agent_type in agent_types:
+                print(f"🔍 SDK INIT: Creating agent '{agent_type}'...")
                 agent = await self.agent_factory.create_agent_with_context(
                     agent_type=agent_type,
                     session_id="system_init",
                     user_id="system"
                 )
                 self.sdk_agents[agent_type] = agent
+                print(f"🔍 SDK INIT: Agent '{agent_type}' created - has SDK agent: {agent.get('sdk_agent') is not None}")
 
             print(f"✅ Initialized {len(self.sdk_agents)} SDK agents")
+            print(f"🔍 SDK INIT: Available agents: {list(self.sdk_agents.keys())}")
             return True
 
         except Exception as e:
             print(f"❌ Failed to initialize SDK agents: {e}")
+            import traceback
+            print(f"🔍 SDK INIT: Full traceback: {traceback.format_exc()}")
             return False
 
     async def process_with_sdk_agent(
@@ -58,13 +66,19 @@ class HybridAgentOrchestrator:
     ) -> Optional[Dict[str, Any]]:
         """Process a user message using SDK agent if available"""
         if agent_type not in self.sdk_agents:
+            print(f"🔍 SDK DEBUG: Agent type '{agent_type}' not in SDK agents: {list(self.sdk_agents.keys())}")
             return None
 
         try:
             sdk_agent = self.sdk_agents[agent_type].get("sdk_agent")
             if not sdk_agent:
-                return None
+                print(f"🔍 SDK DEBUG: No SDK agent found for '{agent_type}', attempting tool registry fallback")
+                
+                # Try to process with tool registry instead of placeholder response
+                return await self._process_with_tool_registry(agent_type, user_message, state)
 
+            print(f"🔍 SDK DEBUG: Using real SDK agent for '{agent_type}'")
+            
             # Get agent context
             context = await self.agent_factory.get_agent_context(
                 agent_type,
@@ -72,9 +86,8 @@ class HybridAgentOrchestrator:
                 state['context']['user_id']
             )
 
-            # Process with SDK agent
-            # Note: This is a simplified implementation
-            # In a real scenario, you'd use the actual SDK API
+            # Process with actual SDK agent
+            # TODO: Implement real OpenAI Agents SDK integration here
             response = {
                 "agent": agent_type,
                 "response": f"SDK Agent {agent_type} processed: {user_message}",
@@ -98,8 +111,21 @@ class HybridAgentOrchestrator:
             return response
 
         except Exception as e:
-            print(f"Error processing with SDK agent {agent_type}: {e}")
+            print(f"🔍 SDK DEBUG: Error processing with SDK agent {agent_type}: {e}")
             return None
+
+    async def _process_with_tool_registry(
+        self,
+        agent_type: str,
+        user_message: str,
+        state: AgentState
+    ) -> Optional[Dict[str, Any]]:
+        """Fallback processing using our tool registry instead of placeholder"""
+        print(f"🔍 SDK DEBUG: Using tool registry fallback for {agent_type}")
+        
+        # Instead of generic response, return None to let LangGraph handle it
+        # This ensures we get proper tool execution instead of placeholder text
+        return None
 
     async def process_with_fallback(
         self,
@@ -151,6 +177,7 @@ class HybridAgentOrchestrator:
         target_agent = recommended_agent or state['current_agent'] or 'contract_agent'
 
         # Try SDK agent first
+        print(f"🔍 ROUTING DEBUG: Targeting agent '{target_agent}' for message: '{user_message[:50]}...'")
         sdk_response = await self.process_with_sdk_agent(target_agent, user_message, state)
 
         if sdk_response:

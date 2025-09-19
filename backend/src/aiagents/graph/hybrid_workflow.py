@@ -89,13 +89,14 @@ def enhanced_router(state: AgentState) -> str:
         orchestrator = get_hybrid_orchestrator()
         agent_status = orchestrator.get_agent_status()
 
-        # If SDK is available and agents are initialized, prefer hybrid workflow
-        if agent_status["sdk_available"] and agent_status["sdk_agents_initialized"]:
-            print(f"🔍 DEBUG: enhanced_router - using hybrid_agent")
-            state['data']['current_agent'] = 'hybrid_agent'
-            return "hybrid_agent"
+        # DISABLED: SDK hybrid workflow (causing fallback issues)
+        # Always use original routing for now
+        # if agent_status["sdk_available"] and agent_status["sdk_agents_initialized"]:
+        #     print(f"🔍 DEBUG: enhanced_router - using hybrid_agent")
+        #     state['data']['current_agent'] = 'hybrid_agent'
+        #     return "hybrid_agent"
 
-        # Fall back to original routing
+        # Use original routing
         print(f"🔍 DEBUG: enhanced_router - using original router")
         router_result = router(state)
         print(f"🔍 DEBUG: enhanced_router - router result: {router_result}")

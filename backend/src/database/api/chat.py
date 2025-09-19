@@ -796,7 +796,10 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 "clients with contracts", "clients and contracts", "clients along with contracts",
                 "show clients with their contracts", "list clients and their contracts",
                 "clients with their contracts", "all clients with their contracts",
-                "show me all clients with their contracts", "show all clients with contracts"
+                "show me all clients with their contracts", "show all clients with contracts",
+                # Billing-related queries that should go through contract_agent
+                "billing", "billing date", "billing prompt", "upcoming billing",
+                "next billing", "billing frequency", "contracts with billing"
             ]
             
             is_complex_client_query = any(query in message_lower for query in complex_client_queries)

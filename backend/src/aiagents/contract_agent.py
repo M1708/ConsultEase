@@ -262,6 +262,48 @@ class ContractAgent:
             {
                 "type": "function",
                 "function": {
+                    "name": "get_contracts_with_null_billing",
+                    "description": "Get contracts where billing prompt date is not set (null). Use this when user asks for 'contracts with no billing date', 'contracts with billing date not set', 'contracts with null billing date', or similar requests. Can filter by specific client or return all contracts.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {
+                                "type": "string", 
+                                "description": "Optional. Filter contracts by specific client name. If not provided, returns all contracts with null billing dates."
+                            }
+                        },
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_contracts_by_amount",
+                    "description": "Get contracts filtered by amount range. Use this when user asks for 'contracts with amount more than $X', 'contracts with original amount greater than $X', or similar requests. Can filter by specific client or return all contracts.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "client_name": {
+                                "type": "string", 
+                                "description": "Optional. Filter contracts by specific client name. If not provided, returns all contracts matching amount criteria."
+                            },
+                            "min_amount": {
+                                "type": "number", 
+                                "description": "Optional. Minimum amount to filter by (e.g., 200000 for $200,000)"
+                            },
+                            "max_amount": {
+                                "type": "number", 
+                                "description": "Optional. Maximum amount to filter by"
+                            }
+                        },
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "upload_contract_document",
                     "description": "Upload a document for a client's contract. Handles file upload and database updates. If client has multiple contracts, will ask user to specify contract ID. CRITICAL: Always extract client name from user message - look for patterns like 'for client [Name]', 'for [Name]', 'this is for [Name]'. IMPROVED: Enhanced parameter validation and file data handling to prevent upload failures.",
                     "parameters": {

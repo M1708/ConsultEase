@@ -49,6 +49,8 @@ from ..tools.contract_tools import (
     create_client_tool,
     search_clients_tool,
     get_contracts_by_client_tool,
+    get_all_clients_with_contracts_tool,
+    get_contracts_for_next_month_billing_tool,
     CreateClientParams,
     UpdateContractParams,
     SmartContractParams,
@@ -215,6 +217,8 @@ class ToolRegistry:
             "create_contract": self._create_contract_tool(),
             "get_contract_details": self._create_get_contract_details_tool(),
             "get_client_contracts": self._create_get_client_contracts_tool(),
+            "get_all_clients_with_contracts": self._create_get_all_clients_with_contracts_tool(),
+            "get_contracts_for_next_month_billing": self._create_get_contracts_for_next_month_billing_tool(),
 
             # Employee Tools
             "create_employee": self._create_employee_tool(),
@@ -1263,4 +1267,64 @@ Rate: {employee['rate']} ({employee['rate_type']})"""
             "name": "search_users",
             "description": "Search for users by email, name, role, or status",
             "parameters": SearchUsersParams
+        }
+
+    def _create_get_all_clients_with_contracts_tool(self):
+        """Create SDK-compatible get all clients with contracts tool"""
+        async def get_all_clients_with_contracts(context: Optional[Dict[str, Any]] = None) -> ContractToolResult:
+            """Get all clients with their contracts information"""
+            try:
+                print(f"🔍 CLIENT QUERY DEBUG: SDK get_all_clients_with_contracts called")
+                
+                # Call existing tool
+                result = await get_all_clients_with_contracts_tool()
+                
+                print(f"🔍 CLIENT QUERY DEBUG: Tool result success={result.success}, message length={len(result.message) if result.message else 0}")
+                
+                return result
+            except Exception as e:
+                return ContractToolResult(
+                    success=False,
+                    message=f"Error getting all clients with contracts: {str(e)}"
+                )
+
+        return {
+            "function": get_all_clients_with_contracts,
+            "name": "get_all_clients_with_contracts",
+            "description": "Get all clients in the system with their contract information",
+            "parameters": {}
+        }
+
+    def _create_get_contracts_for_next_month_billing_tool(self):
+        """Create SDK-compatible get contracts for next month billing tool"""
+        
+        class BillingContractsParams(BaseModel):
+            client_name: Optional[str] = Field(None, description="Client name to filter contracts (optional, if not provided shows all clients)")
+
+        async def get_contracts_for_next_month_billing(params: Optional[BillingContractsParams] = None, context: Optional[Dict[str, Any]] = None) -> ContractToolResult:
+            """Get contracts with upcoming billing dates in the next month"""
+            try:
+                client_name = None
+                if params:
+                    client_name = params.client_name
+                
+                print(f"🔍 BILLING QUERY DEBUG: SDK tool called with client_name='{client_name}', context keys: {list(context.keys()) if context else 'None'}")
+                
+                # Call existing tool
+                result = await get_contracts_for_next_month_billing_tool(client_name=client_name, context=context)
+                
+                print(f"🔍 BILLING QUERY DEBUG: Tool result success={result.success}, message length={len(result.message) if result.message else 0}")
+                
+                return result
+            except Exception as e:
+                return ContractToolResult(
+                    success=False,
+                    message=f"Error getting contracts for next month billing: {str(e)}"
+                )
+
+        return {
+            "function": get_contracts_for_next_month_billing,
+            "name": "get_contracts_for_next_month_billing", 
+            "description": "Get contracts with upcoming billing dates in the next month. If client_name is provided, filters to that client only. If not provided, shows all clients.",
+            "parameters": BillingContractsParams
         }

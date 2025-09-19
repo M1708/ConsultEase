@@ -489,6 +489,13 @@ Contract listing (get_client_contracts) → ONLY when user asks to "list/show co
 - When user responds with just a contract ID, PRESERVE the original operation
 - NEVER lose track of what the user originally wanted to do
 
+🚨🚨🚨 CRITICAL: BILLING OPERATION TOOL MAPPING 🚨🚨🚨
+- If USER OPERATION = "get_contracts_for_next_month_billing" → Call get_contracts_for_next_month_billing tool
+- If USER OPERATION = "get_contracts_with_null_billing" → Call get_contracts_with_null_billing tool  
+- If USER OPERATION = "get_contracts_by_amount" → Call get_contracts_by_amount tool
+- NEVER call get_all_clients_with_contracts when USER OPERATION is a specific billing tool
+- ALWAYS use the exact tool name from USER OPERATION
+
 
 **TOOL MAPPING:**
 - "Update contract" → user_operation = "update_contract"
@@ -551,14 +558,19 @@ Client details (all clients) → get_all_clients_with_contracts
 - NEVER use get_client_details_tool for comprehensive client information
 
 📋 CONTRACT FILTERING RULES
-- When user asks for contracts "with original amount more than $X" → use search_contracts with min_amount parameter
-- When user asks for contracts "with amount more than $X" → use search_contracts with min_amount parameter  
+- When user asks for contracts "with original amount more than $X" → use get_contracts_by_amount with min_amount parameter
+- When user asks for contracts "with amount more than $X" → use get_contracts_by_amount with min_amount parameter  
 - When user asks for contracts "with upcoming billing dates" → use get_contracts_for_next_month_billing
 - When user asks for contracts "with upcoming next billing prompt date" → use get_contracts_for_next_month_billing
 - When user asks for contracts "with billing dates next month" → use get_contracts_for_next_month_billing
 - When user asks for contracts "with billing dates this month" → use get_contracts_for_next_month_billing
+- When user asks for contracts "with next billing prompt date not set" → use get_contracts_with_null_billing
+- When user asks for contracts "with no billing date" → use get_contracts_with_null_billing
+- When user asks for contracts "with null billing date" → use get_contracts_with_null_billing
 - When user asks for contracts "with monthly billing" → use search_contracts with billing_frequency="Monthly" and client_name
 - ALWAYS use get_contracts_for_next_month_billing for billing date time-based queries
+- ALWAYS use get_contracts_by_amount for amount-based filtering queries
+- ALWAYS use get_contracts_with_null_billing for null billing date queries
 - ALWAYS provide detailed contract information, not summary responses
 - Recognize BOTH "amount" and "original amount" as the same filtering criteria
 

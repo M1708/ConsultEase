@@ -1172,12 +1172,14 @@ async def get_contracts_for_next_month_billing_tool(client_name: str = None, con
             if not client_name and context:
                 client_name = context.get('current_client')
             
-            # Start of current month
-            start_of_this_month = today.replace(day=1)
+            # Only show contracts with billing dates in the future (tomorrow onwards)
+            tomorrow = today + timedelta(days=1)
             
-            # End of next month
+            # End of next month for reasonable range
+            start_of_this_month = today.replace(day=1)
             end_of_next_month = (start_of_this_month + relativedelta(months=2)) - timedelta(days=1)
-            print(f"🔍 DEBUG: get_contracts_for_next_month_billing - today: {today}, end_of_next_month: {end_of_next_month}")
+            
+            print(f"🔍 DEBUG: get_contracts_for_next_month_billing - today: {today}, tomorrow: {tomorrow}, end_of_next_month: {end_of_next_month}")
             print(f"🔍 DEBUG: get_contracts_for_next_month_billing - client_name: {client_name}")
             
             stmt = (
@@ -1186,7 +1188,7 @@ async def get_contracts_for_next_month_billing_tool(client_name: str = None, con
                     .options(selectinload(Contract.client))
                     .where(
                         Contract.billing_prompt_next_date.isnot(None),
-                        Contract.billing_prompt_next_date >= today,
+                        Contract.billing_prompt_next_date >= tomorrow,  # Only future dates
                         Contract.billing_prompt_next_date <= end_of_next_month
                     )
                     .order_by(Contract.billing_prompt_next_date.asc())
@@ -1219,16 +1221,36 @@ async def get_contracts_for_next_month_billing_tool(client_name: str = None, con
             null_billing_date_count_result = await session.execute(select(Contract).filter(Contract.billing_prompt_next_date.is_(None)))
             null_billing_date_count = len(null_billing_date_count_result.scalars().all())
             
+            # Format detailed contract information like other tools
             if client_name:
-                message = f"📋 Found {len(contract_list)} contracts for **{client_name}** with upcoming billing dates from {today.strftime('%Y-%m-%d')} to {end_of_next_month.strftime('%Y-%m-%d')}."
+                message = f"📋 **Contracts for {client_name} with upcoming billing dates ({today.strftime('%Y-%m-%d')} to {end_of_next_month.strftime('%Y-%m-%d')}):**\n"
             else:
-                message = f"📋 Found {len(contract_list)} contracts with billing dates from {today.strftime('%Y-%m-%d')} to {end_of_next_month.strftime('%Y-%m-%d')}."
+                message = f"📋 **All contracts with upcoming billing dates ({today.strftime('%Y-%m-%d')} to {end_of_next_month.strftime('%Y-%m-%d')}):**\n"
+            
+            if contract_list:
+                for i, contract in enumerate(contracts, 1):
+                    amount = f"${contract.original_amount:,.2f}" if contract.original_amount else "Not set"
+                    current_amount = f"${contract.current_amount:,.2f}" if contract.current_amount else amount
+                    status = contract.status.title()
+                    billing_date = contract.billing_prompt_next_date.strftime('%B %d, %Y') if contract.billing_prompt_next_date else "Not set"
+                    
+                    message += f"\n**Contract {i} (ID: {contract.contract_id}) - {contract.client.client_name}:**"
+                    message += f"\n- **Type:** {contract.contract_type}"
+                    message += f"\n- **Status:** {status}"
+                    message += f"\n- **Original Amount:** {amount}"
+                    message += f"\n- **Current Amount:** {current_amount}"
+                    message += f"\n- **Billing Frequency:** {contract.billing_frequency or 'Not set'}"
+                    message += f"\n- **Next Billing Date:** {billing_date}"
+                    message += f"\n- **Contact:** {contract.client.primary_contact_name or 'Not specified'} ({contract.client.primary_contact_email or 'Not specified'})"
+                    message += f"\n"
+            else:
+                message += "\nNo contracts found with upcoming billing dates in the specified period."
             
             if null_billing_date_count > 0:
                 if client_name:
-                    message += f" Note: There may be additional contracts for {client_name} with no billing prompt date set."
+                    message += f"\n*Note: There may be additional contracts for {client_name} with no billing prompt date set.*"
                 else:
-                    message += f" Additionally, {null_billing_date_count} contracts have no billing prompt date set."
+                    message += f"\n*Note: {null_billing_date_count} contracts have no billing prompt date set.*"
 
             return ContractToolResult(
                 success=True,
@@ -1237,6 +1259,161 @@ async def get_contracts_for_next_month_billing_tool(client_name: str = None, con
             )
     except Exception as e:
         return ContractToolResult(success=False, message=f"❌ Failed to get contracts for next month's billing: {str(e)}")
+
+async def get_contracts_with_null_billing_tool(client_name: str = None, context: Dict[str, Any] = None) -> ContractToolResult:
+    """Tool for getting contracts with null billing prompt dates."""
+    try:
+        async with get_ai_db() as session:
+            # Use provided client_name parameter or fall back to context
+            if not client_name and context:
+                client_name = context.get('current_client')
+            
+            stmt = (
+                select(Contract)
+                .join(Client)
+                .options(selectinload(Contract.client))
+                .where(Contract.billing_prompt_next_date.is_(None))
+                .order_by(Contract.created_at.desc())
+            )
+            
+            # Add client filter if specified
+            if client_name:
+                stmt = stmt.where(Client.client_name.ilike(f"%{client_name}%"))
+            
+            contracts_result = await session.execute(stmt)
+            contracts = contracts_result.scalars().all()
+            
+            contract_list = [
+                {
+                    "contract_id": contract.contract_id,
+                    "client_name": contract.client.client_name,
+                    "contract_type": contract.contract_type,
+                    "status": contract.status,
+                    "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                    "current_amount": float(contract.current_amount) if contract.current_amount else (float(contract.original_amount) if contract.original_amount else None),
+                    "billing_frequency": contract.billing_frequency,
+                    "billing_prompt_next_date": None,
+                    "primary_contact_name": contract.client.primary_contact_name,
+                    "primary_contact_email": contract.client.primary_contact_email,
+                } for contract in contracts
+            ]
+            
+            # Format detailed contract information
+            if client_name:
+                message = f"📋 **Contracts for {client_name} with no billing prompt date set:**\n"
+            else:
+                message = f"📋 **All contracts with no billing prompt date set:**\n"
+            
+            if contract_list:
+                for i, contract in enumerate(contracts, 1):
+                    amount = f"${contract.original_amount:,.2f}" if contract.original_amount else "Not set"
+                    current_amount = f"${contract.current_amount:,.2f}" if contract.current_amount else amount
+                    status = contract.status.title()
+                    
+                    message += f"\n**Contract {i} (ID: {contract.contract_id}) - {contract.client.client_name}:**"
+                    message += f"\n- **Type:** {contract.contract_type}"
+                    message += f"\n- **Status:** {status}"
+                    message += f"\n- **Original Amount:** {amount}"
+                    message += f"\n- **Current Amount:** {current_amount}"
+                    message += f"\n- **Billing Frequency:** {contract.billing_frequency or 'Not set'}"
+                    message += f"\n- **Next Billing Date:** Not set"
+                    message += f"\n- **Contact:** {contract.client.primary_contact_name or 'Not specified'} ({contract.client.primary_contact_email or 'Not specified'})"
+                    message += f"\n"
+            else:
+                message += "\nNo contracts found with null billing prompt dates."
+            
+            return ContractToolResult(
+                success=True,
+                message=message,
+                data={"contracts": contract_list, "count": len(contract_list)}
+            )
+    except Exception as e:
+        return ContractToolResult(success=False, message=f"❌ Failed to get contracts with null billing dates: {str(e)}")
+
+async def get_contracts_by_amount_tool(min_amount: float = None, max_amount: float = None, client_name: str = None, context: Dict[str, Any] = None) -> ContractToolResult:
+    """Tool for getting contracts filtered by amount range."""
+    try:
+        async with get_ai_db() as session:
+            # Use provided client_name parameter or fall back to context
+            if not client_name and context:
+                client_name = context.get('current_client')
+            
+            stmt = (
+                select(Contract)
+                .join(Client)
+                .options(selectinload(Contract.client))
+                .where(Contract.original_amount.isnot(None))
+                .order_by(Contract.original_amount.desc())
+            )
+            
+            # Add amount filters
+            if min_amount is not None:
+                stmt = stmt.where(Contract.original_amount >= min_amount)
+            if max_amount is not None:
+                stmt = stmt.where(Contract.original_amount <= max_amount)
+            
+            # Add client filter if specified
+            if client_name:
+                stmt = stmt.where(Client.client_name.ilike(f"%{client_name}%"))
+            
+            contracts_result = await session.execute(stmt)
+            contracts = contracts_result.scalars().all()
+            
+            contract_list = [
+                {
+                    "contract_id": contract.contract_id,
+                    "client_name": contract.client.client_name,
+                    "contract_type": contract.contract_type,
+                    "status": contract.status,
+                    "original_amount": float(contract.original_amount) if contract.original_amount else None,
+                    "current_amount": float(contract.current_amount) if contract.current_amount else (float(contract.original_amount) if contract.original_amount else None),
+                    "billing_frequency": contract.billing_frequency,
+                    "billing_prompt_next_date": str(contract.billing_prompt_next_date) if contract.billing_prompt_next_date else None,
+                    "primary_contact_name": contract.client.primary_contact_name,
+                    "primary_contact_email": contract.client.primary_contact_email,
+                } for contract in contracts
+            ]
+            
+            # Format detailed contract information
+            amount_filter = ""
+            if min_amount is not None and max_amount is not None:
+                amount_filter = f" with amount between ${min_amount:,.2f} and ${max_amount:,.2f}"
+            elif min_amount is not None:
+                amount_filter = f" with amount >= ${min_amount:,.2f}"
+            elif max_amount is not None:
+                amount_filter = f" with amount <= ${max_amount:,.2f}"
+            
+            if client_name:
+                message = f"📋 **Contracts for {client_name}{amount_filter}:**\n"
+            else:
+                message = f"📋 **All contracts{amount_filter}:**\n"
+            
+            if contract_list:
+                for i, contract in enumerate(contracts, 1):
+                    amount = f"${contract.original_amount:,.2f}" if contract.original_amount else "Not set"
+                    current_amount = f"${contract.current_amount:,.2f}" if contract.current_amount else amount
+                    status = contract.status.title()
+                    billing_date = contract.billing_prompt_next_date.strftime('%B %d, %Y') if contract.billing_prompt_next_date else "Not set"
+                    
+                    message += f"\n**Contract {i} (ID: {contract.contract_id}) - {contract.client.client_name}:**"
+                    message += f"\n- **Type:** {contract.contract_type}"
+                    message += f"\n- **Status:** {status}"
+                    message += f"\n- **Original Amount:** {amount}"
+                    message += f"\n- **Current Amount:** {current_amount}"
+                    message += f"\n- **Billing Frequency:** {contract.billing_frequency or 'Not set'}"
+                    message += f"\n- **Next Billing Date:** {billing_date}"
+                    message += f"\n- **Contact:** {contract.client.primary_contact_name or 'Not specified'} ({contract.client.primary_contact_email or 'Not specified'})"
+                    message += f"\n"
+            else:
+                message += f"\nNo contracts found{amount_filter}."
+            
+            return ContractToolResult(
+                success=True,
+                message=message,
+                data={"contracts": contract_list, "count": len(contract_list)}
+            )
+    except Exception as e:
+        return ContractToolResult(success=False, message=f"❌ Failed to get contracts by amount: {str(e)}")
 
 class SearchContractsParams(BaseModel):
     client_name: Optional[str] = None
@@ -1389,16 +1566,43 @@ async def get_all_clients_tool() -> ContractToolResult:
                     "created_at": str(client.created_at) if client.created_at else None
                 })
             
+            # Format rich client information
+            message = f"📋 **All Clients ({len(client_list)} clients):**\n\n"
+            
+            for i, client in enumerate(client_list, 1):
+                message += f"**{i}. {client['client_name']}**\n"
+                message += f"- **Industry:** {client['industry'] or 'Not specified'}\n"
+                message += f"- **Primary Contact:** {client['primary_contact_name'] or 'Not specified'}\n"
+                message += f"- **Email:** {client['primary_contact_email'] or 'Not specified'}\n"
+                message += f"- **Company Size:** {client['company_size'] or 'Not specified'}\n"
+                if client['created_at']:
+                    try:
+                        created_date = datetime.fromisoformat(client['created_at'].replace('Z', '+00:00'))
+                        message += f"- **Created:** {created_date.strftime('%B %d, %Y')}\n"
+                    except:
+                        message += f"- **Created:** {client['created_at']}\n"
+                message += f"\n"
+            
+            # Add summary
+            industries = list(set(c["industry"] for c in client_list if c["industry"]))
+            has_contacts = len([c for c in client_list if c["primary_contact_name"] or c["primary_contact_email"]])
+            
+            message += f"**Summary:**\n"
+            message += f"- **Total Clients:** {len(client_list)}\n"
+            message += f"- **Clients with Contact Info:** {has_contacts}\n"
+            if industries:
+                message += f"- **Industries:** {', '.join(industries)}\n"
+
             return ContractToolResult(
                 success=True,
-                message=f"📋 Found {len(client_list)} clients in the system",
+                message=message,
                 data={
                     "clients": client_list,
                     "count": len(client_list),
                     "summary": {
                         "total_clients": len(client_list),
-                        "industries": list(set(c["industry"] for c in client_list if c["industry"])),
-                        "has_contacts": len([c for c in client_list if c["primary_contact_name"] or c["primary_contact_email"]])
+                        "industries": industries,
+                        "has_contacts": has_contacts
                     }
                 }
             )
@@ -1417,7 +1621,7 @@ async def get_all_clients_with_contracts_tool() -> ContractToolResult:
             stmt = select(Client).order_by(Client.client_name)
             result = await session.execute(stmt)
             clients = result.scalars().all()
-        
+            
             clients_with_contracts = []
             total_contracts = 0
             
@@ -1454,17 +1658,51 @@ async def get_all_clients_with_contracts_tool() -> ContractToolResult:
                     "contract_count": len(contract_list)
                 })
             
+            # Format rich client information similar to get_contracts_by_client_tool
+            message = f"📋 **All Clients Overview ({len(clients_with_contracts)} clients, {total_contracts} total contracts):**\n\n"
+            
+            for i, client in enumerate(clients_with_contracts, 1):
+                message += f"**{i}. {client['client_name']}**\n"
+                message += f"- **Industry:** {client['industry'] or 'Not specified'}\n"
+                message += f"- **Primary Contact:** {client['primary_contact_name'] or 'Not specified'}\n"
+                message += f"- **Email:** {client['primary_contact_email'] or 'Not specified'}\n"
+                message += f"- **Company Size:** {client['company_size'] or 'Not specified'}\n"
+                message += f"- **Contracts:** {client['contract_count']} contract(s)\n"
+                
+                if client['contracts']:
+                    message += f"  **Contract Details:**\n"
+                    for j, contract in enumerate(client['contracts'], 1):
+                        amount = f"${contract['original_amount']:,.2f}" if contract['original_amount'] else "Not set"
+                        status = contract['status'].title() if contract['status'] else "Unknown"
+                        message += f"    {j}. Contract {contract['contract_id']} - {contract['contract_type']} ({status}) - {amount}\n"
+                else:
+                    message += f"  *No contracts*\n"
+                message += f"\n"
+            
+            # Add summary
+            clients_with_contracts_count = len([c for c in clients_with_contracts if c["contract_count"] > 0])
+            clients_without_contracts_count = len([c for c in clients_with_contracts if c["contract_count"] == 0])
+            industries = list(set(c["industry"] for c in clients_with_contracts if c["industry"]))
+            
+            message += f"**Summary:**\n"
+            message += f"- **Total Clients:** {len(clients_with_contracts)}\n"
+            message += f"- **Clients with Contracts:** {clients_with_contracts_count}\n"
+            message += f"- **Clients without Contracts:** {clients_without_contracts_count}\n"
+            message += f"- **Total Contracts:** {total_contracts}\n"
+            if industries:
+                message += f"- **Industries:** {', '.join(industries)}\n"
+
             return ContractToolResult(
                 success=True,
-                message=f"📋 Found {len(clients_with_contracts)} clients with {total_contracts} total contracts",
+                message=message,
                 data={
                     "clients_with_contracts": clients_with_contracts,
                     "summary": {
                         "total_clients": len(clients_with_contracts),
                         "total_contracts": total_contracts,
-                        "clients_with_contracts": len([c for c in clients_with_contracts if c["contract_count"] > 0]),
-                        "clients_without_contracts": len([c for c in clients_with_contracts if c["contract_count"] == 0]),
-                        "industries": list(set(c["industry"] for c in clients_with_contracts if c["industry"]))
+                        "clients_with_contracts": clients_with_contracts_count,
+                        "clients_without_contracts": clients_without_contracts_count,
+                        "industries": industries
                     }
                 }
             )

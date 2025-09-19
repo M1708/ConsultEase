@@ -29,7 +29,14 @@ class ContextExtractor:
             r"upload",
             r"update\s+client",
             r"create\s+client",
-            r"delete\s+client"
+            r"delete\s+client",
+            # Billing-related patterns that should not be treated as client names
+            r"billing\s+prompt\s+date",
+            r"next\s+billing",
+            r"upcoming\s+billing",
+            r"billing\s+date",
+            r"amount\s+more\s+than",
+            r"original\s+amount"
         ]
         
         self.workflow_patterns = [
@@ -201,8 +208,18 @@ class ContextExtractor:
         """Extract the specific tool operation from the user message."""
         text_lower = text.lower()
         
+        # Billing-specific operations (check these first for priority)
+        if ('billing' in text_lower or 'upcoming' in text_lower) and 'contract' in text_lower:
+            if ('not set' in text_lower or 'null' in text_lower or 'no billing' in text_lower or 
+                'no next billing' in text_lower or 'billing prompt date not set' in text_lower):
+                return 'get_contracts_with_null_billing'
+            else:
+                return 'get_contracts_for_next_month_billing'
+        elif 'amount' in text_lower and ('more than' in text_lower or 'greater than' in text_lower) and 'contract' in text_lower:
+            return 'get_contracts_by_amount'
+        
         # Contract operations
-        if 'update' in text_lower and 'contract' in text_lower:
+        elif 'update' in text_lower and 'contract' in text_lower:
             return 'update_contract'
         elif 'delete' in text_lower and 'contract' in text_lower:
             return 'delete_contract'

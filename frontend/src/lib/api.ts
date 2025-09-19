@@ -174,9 +174,23 @@ class ApiClient {
         "client list",
       ];
 
+      // Check for complex queries that should go through normal routing
+      const complexQueries = [
+        "clients with contracts", "clients and contracts", "clients along with contracts",
+        "show clients with their contracts", "list clients and their contracts",
+        "clients with their contracts", "all clients with their contracts",
+        "show me all clients with their contracts", "show all clients with contracts",
+        // Billing-related queries that should go through contract_agent
+        "billing", "billing date", "billing prompt", "upcoming billing",
+        "next billing", "billing frequency", "contracts with billing"
+      ];
+
+      const isComplexQuery = complexQueries.some((query) =>
+        message.toLowerCase().includes(query)
+      );
       const isClientQuery = clientQueries.some((query) =>
         message.includes(query)
-      );
+      ) && !isComplexQuery;
 
       if (isClientQuery) {
         console.log("🚀 FRONTEND: Using fast clients endpoint!");
