@@ -170,6 +170,19 @@ class EnhancedRoutingLogic:
         print(f"🔍 ENHANCED ROUTING: classify_request called with user_message='{user_message}', context={context}")
         message_lower = user_message.lower()
 
+        # EARLY special-case: explicit client details phrasing → client_agent
+        if ("client" in message_lower) and (
+            "show details" in message_lower or "client details" in message_lower or "details" in message_lower
+        ):
+            print("🔍 ENHANCED ROUTING: Early match for client details → client_agent")
+            return {
+                "agent_name": "client_agent",
+                "confidence": "high",
+                "reasoning": "Explicit client details phrasing",
+                "operation_type": "retrieve",
+                "scores": {"client_agent": 10.0, "contract_agent": 0.0, "employee_agent": 0.0}
+            }
+
         # TODO: CONFIRMATION FIX - Step 0: Check for confirmation responses first
         if self._is_confirmation_response(user_message, context):
             current_agent = context.get('current_agent')
@@ -186,6 +199,20 @@ class EnhancedRoutingLogic:
         # Step 1: Identify operation type
         operation_type = self._identify_operation_type(message_lower)
         print(f"🔍 ENHANCED ROUTING: operation_type='{operation_type}'")
+
+        # Special-case: client detail queries should go to client_agent
+        if (
+            ("client" in message_lower or "clients" in message_lower)
+            and any(kw in message_lower for kw in ["show details", "details", "get details", "client details"]) 
+        ):
+            print("🔍 ENHANCED ROUTING: Detected client details request → routing to client_agent")
+            return {
+                "agent_name": "client_agent",
+                "confidence": "high",
+                "reasoning": "Detected client details request",
+                "operation_type": "retrieve",
+                "scores": {"client_agent": 10.0, "contract_agent": 0.0, "employee_agent": 0.0}
+            }
 
         # Step 2: Check for contract operations (high priority)
         if any(keyword in user_message.lower() for keyword in ['create a new contract', 'create contract', 'new contract', 'contract for', 'billing', 'invoice']):

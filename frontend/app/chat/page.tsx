@@ -44,13 +44,12 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load chat session on mount (non-blocking)
-  useEffect(() => {
-    // Load session in background without blocking UI
-    setTimeout(() => {
-      loadChatSession();
-    }, 100); // Small delay to let UI render first
-  }, [loadChatSession]);
+  // Disabled auto-restore on mount to avoid restoring after re-login
+  // useEffect(() => {
+  //   setTimeout(() => {
+  //     loadChatSession();
+  //   }, 100);
+  // }, [loadChatSession]);
 
   // Handle resizing
   const handleMouseDown = (e: React.MouseEvent) => {

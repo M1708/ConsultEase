@@ -6,7 +6,10 @@ import {
 } from "@/types/chat";
 import { supabase } from "./supabase";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "http://localhost:8000";
 
 class ApiClient {
   // private async getAuthHeaders() {
@@ -21,12 +24,14 @@ class ApiClient {
   //   };
   // }
   private async getAuthHeaders() {
+    // Avoid localStorage access during SSR/prerender
+    if (typeof window === "undefined") {
+      return { "Content-Type": "application/json" };
+    }
     const token = localStorage.getItem("supabase_token");
     return {
       "Content-Type": "application/json",
-      ...(token && {
-        Authorization: `Bearer ${token}`,
-      }),
+      ...(token && { Authorization: `Bearer ${token}` }),
     };
   }
 

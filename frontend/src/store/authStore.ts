@@ -88,8 +88,25 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       set({ loading: true });
 
-      // Get token from localStorage
-      const token = localStorage.getItem("supabase_token");
+      // Get fresh access token from Supabase, fallback to stored token
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || localStorage.getItem("supabase_token");
+
+      // Best-effort: delete server-side chat history for current session
+      try {
+        const { useChatStore } = await import("@/store/chatStore");
+        const { sessionId } = useChatStore.getState();
+        const { user } = get();
+        if (token && sessionId && user) {
+          const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+          await fetch(`${base}/api/chat/session/${sessionId}?user_id=${user.user_id}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {});
+        }
+      } catch {
+        // Non-critical cleanup failure
+      }
 
       // Clear localStorage immediately for faster UI response
       localStorage.removeItem("supabase_token");
@@ -102,6 +119,16 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         loading: false,
         error: null,
       });
+
+      // Clear chat state and start a fresh session id
+      try {
+        const { clearMessages } = await import("@/store/chatStore");
+        // invoking directly from store's set state
+        const chatStore = (await import("@/store/chatStore")).useChatStore;
+        chatStore.getState().clearMessages();
+      } catch (e) {
+        console.warn("Chat store cleanup failed (non-critical):", e);
+      }
 
       // Run cleanup operations in parallel (non-blocking)
       Promise.all([

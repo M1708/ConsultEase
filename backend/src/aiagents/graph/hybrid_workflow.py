@@ -98,8 +98,24 @@ def enhanced_router(state: AgentState) -> str:
                     state['data']['routing_completed'] = True
                     return 'employee_agent'
                 
-                # General employee operations check
-                if any(pattern in message_content for pattern in ['employee', 'staff', 'worker', 'personnel', 'details for employee', 'show details for', 'full time', 'part time', 'full-time', 'part-time', 'update employee', 'update committed hours', 'update rate', 'update job title', 'update department', 'delete contract document for employee', 'delete nda document for employee', 'delete document for employee']) or ('upload' in message_content and ('employee' in message_content or 'staff' in message_content or 'worker' in message_content or 'personnel' in message_content)) or ('delete' in message_content and ('employee' in message_content or 'staff' in message_content or 'worker' in message_content or 'personnel' in message_content)):
+                # General employee operations check (avoid catching generic "show details for client ...")
+                if any(pattern in message_content for pattern in [
+                    'employee', 'staff', 'worker', 'personnel',
+                    'details for employee',  # keep employee-specific details
+                    # removed generic 'show details for' to prevent misrouting client details
+                    'full time', 'part time', 'full-time', 'part-time',
+                    'update employee', 'update committed hours', 'update rate',
+                    'update job title', 'update department',
+                    'delete contract document for employee', 'delete nda document for employee', 'delete document for employee'
+                ]) or (
+                    'upload' in message_content and (
+                        'employee' in message_content or 'staff' in message_content or 'worker' in message_content or 'personnel' in message_content
+                    )
+                ) or (
+                    'delete' in message_content and (
+                        'employee' in message_content or 'staff' in message_content or 'worker' in message_content or 'personnel' in message_content
+                    )
+                ):
                     print(f"🔍 DEBUG: enhanced_router - DETECTED EMPLOYEE OPERATION, forcing employee_agent")
                     # Force employee agent and update state
                     state['current_agent'] = 'employee_agent'

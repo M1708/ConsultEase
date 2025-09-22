@@ -92,3 +92,37 @@ async def get_chat_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve chat session: {str(e)}"
         )
+
+@router.delete("/session/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    user_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    """Delete chat session data from Redis/in-memory store"""
+    # Verify user can only delete their own session
+    if user_id != str(current_user.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete session for different user"
+        )
+
+    try:
+        # Invalidate chat data
+        if session_manager.redis_client:
+            chat_key = f"chat:{session_id}:user:{user_id}"
+            session_manager.redis_client.delete(chat_key)
+        else:
+            chat_key = f"chat:{session_id}:user:{user_id}"
+            if hasattr(session_manager, "_mock_chats") and chat_key in session_manager._mock_chats:
+                del session_manager._mock_chats[chat_key]
+
+        # Optionally also invalidate the session record
+        await session_manager.invalidate_session(session_id, user_id)
+
+        return {"message": "Chat session deleted"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete chat session: {str(e)}"
+        )
