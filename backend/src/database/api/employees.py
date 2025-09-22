@@ -66,12 +66,11 @@ async def upload_employee_nda(
         
         if upload_result["success"]:
             # Update employee record with NDA document info
-            employee.nda_document_bucket_name = "employee-nda-documents"
+            # Bucket name is defaulted in database, no need to set
             employee.nda_document_file_size = upload_result["file_size"]
             employee.nda_document_mime_type = upload_result["mime_type"]
             employee.nda_document_uploaded_at = upload_result["uploaded_at"]
-            # Keep legacy field for backward compatibility
-            employee.nda_file_link = upload_result["file_path"]
+            # Legacy field removed - using nda_document_file_path only
             employee.updated_by = current_user.user_id
             employee.updated_at = func.now()
             
@@ -137,12 +136,11 @@ async def upload_employee_contract(
         
         if upload_result["success"]:
             # Update employee record with contract document info
-            employee.contract_document_bucket_name = "employee-contract-documents"
+            # Bucket name is defaulted in database, no need to set
             employee.contract_document_file_size = upload_result["file_size"]
             employee.contract_document_mime_type = upload_result["mime_type"]
             employee.contract_document_uploaded_at = upload_result["uploaded_at"]
-            # Keep legacy field for backward compatibility
-            employee.contract_file_link = upload_result["file_path"]
+            # Legacy field removed - using contract_document_file_path only
             employee.updated_by = current_user.user_id
             employee.updated_at = func.now()
             
@@ -178,17 +176,17 @@ async def delete_employee_nda(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        if not employee.nda_file_link:
+        if not employee.nda_document_file_path:
             raise HTTPException(status_code=404, detail="No NDA document found for this employee")
         
         # Delete from storage
         storage_service = SupabaseStorageService()
-        delete_success = await storage_service.delete_employee_nda_document(employee.nda_file_link)
+        delete_success = await storage_service.delete_employee_nda_document(employee.nda_document_file_path)
         
         if delete_success:
             # Clear document fields
-            employee.nda_file_link = None
-            employee.nda_document_bucket_name = None
+            # Legacy field removed - using nda_document_file_path only
+            # Bucket name is defaulted in database, no need to clear
             employee.nda_document_file_size = None
             employee.nda_document_mime_type = None
             employee.nda_document_uploaded_at = None
@@ -219,17 +217,17 @@ async def delete_employee_contract(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        if not employee.contract_file_link:
+        if not employee.contract_document_file_path:
             raise HTTPException(status_code=404, detail="No contract document found for this employee")
         
         # Delete from storage
         storage_service = SupabaseStorageService()
-        delete_success = await storage_service.delete_employee_contract_document(employee.contract_file_link)
+        delete_success = await storage_service.delete_employee_contract_document(employee.contract_document_file_path)
         
         if delete_success:
             # Clear document fields
-            employee.contract_file_link = None
-            employee.contract_document_bucket_name = None
+            # Legacy field removed - using contract_document_file_path only
+            # Bucket name is defaulted in database, no need to clear
             employee.contract_document_file_size = None
             employee.contract_document_mime_type = None
             employee.contract_document_uploaded_at = None
@@ -268,12 +266,12 @@ async def get_employee_documents(
         
         # Build NDA document info
         nda_document = None
-        if employee.nda_file_link:
-            download_url = storage_service.get_employee_nda_document_url(employee.nda_file_link)
+        if employee.nda_document_file_path:
+            download_url = storage_service.get_employee_nda_document_url(employee.nda_document_file_path)
             nda_document = EmployeeDocumentInfo(
                 document_type="nda",
                 filename=employee.nda_document_mime_type.split('/')[-1] if employee.nda_document_mime_type else None,
-                file_path=employee.nda_file_link,
+                file_path=employee.nda_document_file_path,
                 file_size=employee.nda_document_file_size,
                 mime_type=employee.nda_document_mime_type,
                 uploaded_at=employee.nda_document_uploaded_at,
@@ -289,12 +287,12 @@ async def get_employee_documents(
         
         # Build contract document info
         contract_document = None
-        if employee.contract_file_link:
-            download_url = storage_service.get_employee_contract_document_url(employee.contract_file_link)
+        if employee.contract_document_file_path:
+            download_url = storage_service.get_employee_contract_document_url(employee.contract_document_file_path)
             contract_document = EmployeeDocumentInfo(
                 document_type="contract",
                 filename=employee.contract_document_mime_type.split('/')[-1] if employee.contract_document_mime_type else None,
-                file_path=employee.contract_file_link,
+                file_path=employee.contract_document_file_path,
                 file_size=employee.contract_document_file_size,
                 mime_type=employee.contract_document_mime_type,
                 uploaded_at=employee.contract_document_uploaded_at,
@@ -332,12 +330,12 @@ async def get_employee_nda(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        if not employee.nda_file_link:
+        if not employee.nda_document_file_path:
             raise HTTPException(status_code=404, detail="No NDA document found for this employee")
         
         # Get download URL
         storage_service = SupabaseStorageService()
-        download_url = storage_service.get_employee_nda_document_url(employee.nda_file_link)
+        download_url = storage_service.get_employee_nda_document_url(employee.nda_document_file_path)
         
         if not download_url:
             raise HTTPException(status_code=500, detail="Failed to generate download URL")
@@ -369,12 +367,12 @@ async def get_employee_contract(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         
-        if not employee.contract_file_link:
+        if not employee.contract_document_file_path:
             raise HTTPException(status_code=404, detail="No contract document found for this employee")
         
         # Get download URL
         storage_service = SupabaseStorageService()
-        download_url = storage_service.get_employee_contract_document_url(employee.contract_file_link)
+        download_url = storage_service.get_employee_contract_document_url(employee.contract_document_file_path)
         
         if not download_url:
             raise HTTPException(status_code=500, detail="Failed to generate download URL")

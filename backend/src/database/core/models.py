@@ -208,9 +208,7 @@ class Employee(Base):
     rate = Column(Numeric(10, 2))
     currency = Column(String(3), default='USD')
     
-    # Documents - Legacy fields (kept for backward compatibility)
-    nda_file_link = Column(String(500))
-    contract_file_link = Column(String(500))
+    # Legacy fields removed - using nda_document_file_path and contract_document_file_path
     
     # Document fields for NDA - Enhanced storage with metadata
     nda_document_bucket_name = Column(String(50), default='employee-nda-documents')

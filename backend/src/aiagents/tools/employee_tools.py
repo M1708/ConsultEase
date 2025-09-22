@@ -60,8 +60,6 @@ class CreateEmployeeParams(BaseModel):
     rate: Optional[float] = None
     salary: Optional[float] = None
     currency: str = "USD"
-    nda_file_link: Optional[str] = None
-    contract_file_link: Optional[str] = None
     # Document upload fields for creation
     nda_document_data: Optional[str] = None  # Base64 encoded file data
     nda_document_filename: Optional[str] = None
@@ -87,8 +85,6 @@ class UpdateEmployeeParams(BaseModel):
     rate_type: Optional[str] = None
     rate: Optional[float] = None
     currency: Optional[str] = None
-    nda_file_link: Optional[str] = None
-    contract_file_link: Optional[str] = None
 
 
 class DeleteEmployeeParams(BaseModel):
@@ -419,7 +415,15 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                 
                 if len(profiles) > 1:
                     # Multiple profiles found - ask for clarification
-                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    profile_names = []
+                    for p in profiles:
+                        # Handle null last_name properly
+                        if p.last_name:
+                            full_name = f"{p.first_name} {p.last_name}"
+                        else:
+                            full_name = p.first_name or "Unknown"
+                        profile_names.append(f"{full_name} ({p.email})")
+                    
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ Multiple profiles found for '{params.employee_name}': {', '.join(profile_names)}. Please specify which profile to use."
@@ -449,11 +453,17 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
             
             if existing_employee:
                 # Get employee name from profile for better error message
-                employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
+                if profile_exists and profile_exists.first_name:
+                    if profile_exists.last_name:
+                        employee_name = f"{profile_exists.first_name} {profile_exists.last_name}"
+                    else:
+                        employee_name = profile_exists.first_name
+                else:
+                    employee_name = "Unknown"
                 
                 return EmployeeToolResult(
                     success=False,
-                    message=f"❌ Employee record already exists for this profile. Please present the existing employee information in a user-friendly format, showing all available fields in a clear, organized manner.",
+                    message=f"❌ Employee record already exists for this profile.",
                     data={
                         "employee_id": existing_employee.employee_id,
                         "employee_name": employee_name,
@@ -470,8 +480,8 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                         "rate": float(existing_employee.rate) if existing_employee.rate else None,
                         "currency": existing_employee.currency,
                         "email": profile_exists.email,
-                        "nda_file_link": existing_employee.nda_file_link,
-                        "contract_file_link": existing_employee.contract_file_link,
+                        "nda_document_file_path": existing_employee.nda_document_file_path,
+                        "contract_document_file_path": existing_employee.contract_document_file_path,
                         "status": "Active"
                     }
                 )
@@ -536,8 +546,8 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                 rate_type=final_rate_type,
                 rate=Decimal(str(final_rate)) if final_rate else None,
                 currency=params.currency,
-                nda_file_link=params.nda_file_link,
-                contract_file_link=params.contract_file_link,
+                nda_document_file_path=None,  # Will be set when documents are uploaded
+                contract_document_file_path=None,  # Will be set when documents are uploaded
                 created_by=user_id,
                 updated_by=user_id
             )
@@ -550,7 +560,13 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                 await session.refresh(db_employee)
                 
                 # Get the employee name from the profile for the success message
-                employee_name = f"{profile_exists.first_name} {profile_exists.last_name}" if profile_exists and profile_exists.first_name and profile_exists.last_name else "Unknown"
+                if profile_exists and profile_exists.first_name:
+                    if profile_exists.last_name:
+                        employee_name = f"{profile_exists.first_name} {profile_exists.last_name}"
+                    else:
+                        employee_name = profile_exists.first_name
+                else:
+                    employee_name = "Unknown"
                 
                 # Handle document uploads if provided
                 uploaded_documents = []
@@ -570,7 +586,7 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                         
                         if upload_result["success"]:
                             # Update employee record with document info
-                            db_employee.nda_document_bucket_name = "employee-nda-documents"
+                            # Bucket name is defaulted in database, no need to set
                             db_employee.nda_document_file_size = upload_result["file_size"]
                             db_employee.nda_document_mime_type = upload_result["mime_type"]
                             db_employee.nda_document_uploaded_at = upload_result["uploaded_at"]
@@ -596,7 +612,7 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                         
                         if upload_result["success"]:
                             # Update employee record with document info
-                            db_employee.contract_document_bucket_name = "employee-contract-documents"
+                            # Bucket name is defaulted in database, no need to set
                             db_employee.contract_document_file_size = upload_result["file_size"]
                             db_employee.contract_document_mime_type = upload_result["mime_type"]
                             db_employee.contract_document_uploaded_at = upload_result["uploaded_at"]
@@ -650,8 +666,8 @@ async def create_employee_tool(params: CreateEmployeeParams, context: Dict[str, 
                     "currency": db_employee.currency,
                     "committed_hours": db_employee.committed_hours,
                     "email": profile_exists.email,
-                    "nda_file_link": db_employee.nda_file_link,
-                    "contract_file_link": db_employee.contract_file_link,
+                    "nda_document_file_path": db_employee.nda_document_file_path,
+                    "contract_document_file_path": db_employee.contract_document_file_path,
                     "uploaded_documents": uploaded_documents,
                     "status": "Active"
                 }
@@ -722,33 +738,50 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
                         message=f"❌ No employee record found for profile ID {params.profile_id}. The profile exists but no employee record has been created."
                     )
             elif params.employee_name:
-                # TODO: OPTIMIZATION - Efficient profile search with indexed fields only
-                # Search for profiles inline to avoid nested database sessions
+                # Search for profiles by employee name - prioritize exact name matches
                 cleaned_name = params.employee_name.strip()
                 
-                # TODO: OPTIMIZATION - Prioritize indexed fields for better performance
-                # Use email first (likely indexed), then name fields
-                # Avoid expensive func.concat operations and multiple ilike conditions
-                conditions = [
-                    User.email.ilike(f"%{cleaned_name}%"),  # Email search (likely indexed)
-                    User.first_name.ilike(f"%{cleaned_name}%"),  # First name search
-                    User.last_name.ilike(f"%{cleaned_name}%")  # Last name search
-                ]
-                
-                # TODO: OPTIMIZATION - Add full name search only if needed
-                # Use simpler approach than func.concat for better performance
+                # First try exact name matches (most specific)
+                exact_conditions = []
                 if ' ' in cleaned_name:
-                    # Split name and search for both parts
+                    # Full name search - split and match both first and last name
                     name_parts = cleaned_name.split()
                     if len(name_parts) >= 2:
-                        conditions.extend([
-                            User.first_name.ilike(f"%{name_parts[0]}%"),
-                            User.last_name.ilike(f"%{name_parts[-1]}%")
-                        ])
+                        exact_conditions.append(
+                            and_(
+                                User.first_name.ilike(f"%{name_parts[0]}%"),
+                                User.last_name.ilike(f"%{name_parts[-1]}%")
+                            )
+                        )
+                else:
+                    # Single name - try first name or last name
+                    exact_conditions.extend([
+                        User.first_name.ilike(f"%{cleaned_name}%"),
+                        User.last_name.ilike(f"%{cleaned_name}%")
+                    ])
                 
-                # Execute profile search in the same session
-                result = await session.execute(select(User).filter(or_(*conditions)))
-                profiles = result.scalars().all()
+                # Execute exact name search first
+                if exact_conditions:
+                    result = await session.execute(select(User).filter(or_(*exact_conditions)))
+                    profiles = result.scalars().all()
+                    
+                    # If we found exact name matches, use those
+                    if profiles:
+                        pass  # Use the exact matches
+                    else:
+                        # Fallback to broader search including email (but less preferred)
+                        fallback_conditions = [
+                            User.email.ilike(f"%{cleaned_name}%")
+                        ]
+                        result = await session.execute(select(User).filter(or_(*fallback_conditions)))
+                        profiles = result.scalars().all()
+                else:
+                    # No exact conditions, use fallback
+                    fallback_conditions = [
+                        User.email.ilike(f"%{cleaned_name}%")
+                    ]
+                    result = await session.execute(select(User).filter(or_(*fallback_conditions)))
+                    profiles = result.scalars().all()
                 
                 if not profiles:
                     return EmployeeToolResult(
@@ -758,7 +791,15 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
                 
                 if len(profiles) > 1:
                     # Multiple profiles found - ask for clarification
-                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    profile_names = []
+                    for p in profiles:
+                        # Handle null last_name properly
+                        if p.last_name:
+                            full_name = f"{p.first_name} {p.last_name}"
+                        else:
+                            full_name = p.first_name or "Unknown"
+                        profile_names.append(f"{full_name} ({p.email})")
+                    
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ Multiple profiles found for '{params.employee_name}': {', '.join(profile_names)}. Please be more specific."
@@ -849,13 +890,8 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
                 employee.currency = params.currency
                 update_fields.append("currency")
             
-            if params.nda_file_link is not None:
-                employee.nda_file_link = params.nda_file_link
-                update_fields.append("nda_file_link")
-            
-            if params.contract_file_link is not None:
-                employee.contract_file_link = params.contract_file_link
-                update_fields.append("contract_file_link")
+            # Note: Document file paths are updated through document upload functions
+            # Legacy fields removed - use nda_document_file_path and contract_document_file_path
             
             if not update_fields:
                 return EmployeeToolResult(
@@ -880,10 +916,40 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
                 check_profile = await session.execute(select(User.first_name, User.last_name).filter(User.user_id == employee.profile_id))
                 profile_name = check_profile.first()
                 
+                # Convert technical field names to user-friendly messages
+                def get_friendly_field_name(field):
+                    field_mapping = {
+                        'employee_number': 'employee number',
+                        'job_title': 'job title',
+                        'department': 'department',
+                        'employment_type': 'employment type',
+                        'full_time_part_time': 'work schedule',
+                        'committed_hours': 'committed hours',
+                        'hire_date': 'hire date',
+                        'termination_date': 'termination date',
+                        'rate_type': 'rate type',
+                        'rate': 'rate',
+                        'currency': 'currency'
+                    }
+                    return field_mapping.get(field, field.replace('_', ' '))
+                
+                # Create user-friendly success message
+                if len(update_fields) == 1:
+                    friendly_field = get_friendly_field_name(update_fields[0])
+                    success_message = f"✅ Employee information updated successfully. Changed: {friendly_field}."
+                else:
+                    friendly_fields = [get_friendly_field_name(field) for field in update_fields]
+                    if len(friendly_fields) == 2:
+                        success_message = f"✅ Employee information updated successfully. Changed: {friendly_fields[0]} and {friendly_fields[1]}."
+                    else:
+                        last_field = friendly_fields[-1]
+                        other_fields = ', '.join(friendly_fields[:-1])
+                        success_message = f"✅ Employee information updated successfully. Changed: {other_fields}, and {last_field}."
+                
                 # Return success response using existing employee data
                 return EmployeeToolResult(
                     success=True,
-                    message=f"✅ Successfully updated employee. Updated fields: {', '.join(update_fields)}. Please present the employee information in a user-friendly format, showing only non-null fields in a clear, organized manner.",
+                    message=success_message,
                     data={
                         "updated_fields": update_fields,
                         "employee": {
@@ -900,8 +966,8 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
                             "rate_type": employee.rate_type,
                             "rate": float(employee.rate) if employee.rate else None,
                             "currency": employee.currency,
-                            "nda_file_link": employee.nda_file_link,
-                            "contract_file_link": employee.contract_file_link,
+                            "nda_document_file_path": employee.nda_document_file_path,
+                            "contract_document_file_path": employee.contract_document_file_path,
                             "created_at": str(employee.created_at) if employee.created_at else None,
                             "updated_at": str(employee.updated_at) if employee.updated_at else None
                         },
@@ -938,12 +1004,202 @@ async def update_employee_tool(params: UpdateEmployeeParams, context: Dict[str, 
             message=f"❌ Failed to update employee: {str(e)}"
         )
 
-@cached_search_operation(cache_ttl=180, track_performance=True)
+def parse_salary_query(search_term: str) -> Dict[str, Any]:
+    """Parse salary queries like 'hourly rate greater than $50' or 'salary more than $10000 monthly'"""
+    search_lower = search_term.lower()
+    
+    # Initialize result
+    result = {
+        'min_rate': None,
+        'max_rate': None,
+        'rate_type': None,
+        'currency': 'USD',
+        'is_salary_query': False
+    }
+    
+    # Pattern for "hourly rate greater than $50"
+    hourly_pattern = r'hourly\s+rate\s+(greater\s+than|more\s+than|>|>=|less\s+than|<|<=|=)\s*\$?(\d+(?:\.\d+)?)'
+    hourly_match = re.search(hourly_pattern, search_lower)
+    if hourly_match:
+        result['is_salary_query'] = True
+        result['rate_type'] = 'hourly'
+        operator = hourly_match.group(1).lower()
+        rate_value = float(hourly_match.group(2))
+        
+        if 'greater' in operator or 'more' in operator or operator in ['>', '>=']:
+            result['min_rate'] = rate_value
+        elif 'less' in operator or operator in ['<', '<=']:
+            result['max_rate'] = rate_value
+        elif operator == '=':
+            result['min_rate'] = rate_value
+            result['max_rate'] = rate_value
+        return result
+    
+    # Pattern for "salary greater than $10000 monthly" or "salary more than $10000 monthly"
+    salary_pattern = r'salary\s+(greater\s+than|more\s+than|>|>=|less\s+than|<|<=|=)\s*\$?(\d+(?:\.\d+)?)\s*(monthly|annually)?'
+    salary_match = re.search(salary_pattern, search_lower)
+    if salary_match:
+        result['is_salary_query'] = True
+        result['rate_type'] = 'salary'
+        operator = salary_match.group(1).lower()
+        rate_value = float(salary_match.group(2))
+        period = salary_match.group(3) if salary_match.group(3) else 'monthly'
+        
+        # Convert to monthly if annually specified
+        if period == 'annually':
+            rate_value = rate_value / 12
+        
+        if 'greater' in operator or 'more' in operator or operator in ['>', '>=']:
+            result['min_rate'] = rate_value
+        elif 'less' in operator or operator in ['<', '<=']:
+            result['max_rate'] = rate_value
+        elif operator == '=':
+            result['min_rate'] = rate_value
+            result['max_rate'] = rate_value
+        return result
+    
+    # Pattern for "rate greater than $50" (generic)
+    generic_pattern = r'rate\s+(greater\s+than|more\s+than|>|>=|less\s+than|<|<=|=)\s*\$?(\d+(?:\.\d+)?)'
+    generic_match = re.search(generic_pattern, search_lower)
+    if generic_match:
+        result['is_salary_query'] = True
+        # Don't set rate_type for generic queries - search all types
+        operator = generic_match.group(1).lower()
+        rate_value = float(generic_match.group(2))
+        
+        if 'greater' in operator or 'more' in operator or operator in ['>', '>=']:
+            result['min_rate'] = rate_value
+        elif 'less' in operator or operator in ['<', '<=']:
+            result['max_rate'] = rate_value
+        elif operator == '=':
+            result['min_rate'] = rate_value
+            result['max_rate'] = rate_value
+        return result
+    
+    # Pattern for "between $40 and $80"
+    between_pattern = r'between\s*\$?(\d+(?:\.\d+)?)\s*and\s*\$?(\d+(?:\.\d+)?)'
+    between_match = re.search(between_pattern, search_lower)
+    if between_match:
+        result['is_salary_query'] = True
+        result['min_rate'] = float(between_match.group(1))
+        result['max_rate'] = float(between_match.group(2))
+        return result
+    
+    # Pattern for "high earners" or "high earners"
+    if 'high earners' in search_lower or 'high earners' in search_lower:
+        result['is_salary_query'] = True
+        # Set a threshold for high earners (e.g., > $50 hourly or > $75000 annually)
+        result['min_rate'] = 50  # This will be interpreted as hourly rate
+        return result
+    
+    return result
+
+# @cached_search_operation(cache_ttl=180, track_performance=True)  # Disabled due to stale cache issues
 async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeToolResult:
-    """Tool for searching employees by name, job title, department, or employee number"""
+    """Tool for searching employees by name, job title, department, employee number, or salary criteria"""
 
     try:
         async with get_ai_db() as session:
+            # First check if this is a salary query
+            salary_params = parse_salary_query(search_term)
+            print(f"🔎 EMP-SEARCH DEBUG | salary_query_detected={salary_params['is_salary_query']} | term='{search_term}' | params={ {k:v for k,v in salary_params.items() if k!='is_salary_query'} }")
+            
+            if salary_params['is_salary_query']:
+                # Build query with salary filtering
+                query = select(Employee).join(User, Employee.profile_id == User.user_id)
+                
+                # Apply rate type filter if specified
+                if salary_params['rate_type']:
+                    query = query.where(Employee.rate_type == salary_params['rate_type'])
+                
+                # Apply rate range filters
+                if salary_params['min_rate'] is not None:
+                    query = query.where(Employee.rate >= salary_params['min_rate'])
+                
+                if salary_params['max_rate'] is not None:
+                    query = query.where(Employee.rate <= salary_params['max_rate'])
+                
+                # Apply currency filter
+                if salary_params['currency']:
+                    query = query.where(Employee.currency == salary_params['currency'])
+                
+                # Execute query
+                result = await session.execute(query)
+                employees = result.scalars().all()
+                print(f"🔎 EMP-SEARCH DEBUG | salary_query_results count={len(employees)}")
+                
+                if not employees:
+                    return EmployeeToolResult(
+                        success=True,
+                        message=f"No employees found matching the salary criteria: {search_term}",
+                        data=[]
+                    )
+                
+                # Format results
+                employee_data = []
+                for emp in employees[:limit]:
+                    # Get profile information
+                    profile_query = select(User).where(User.user_id == emp.profile_id)
+                    profile_result = await session.execute(profile_query)
+                    profile = profile_result.scalar_one_or_none()
+                    if not profile:
+                        print(f"⚠️ EMP-SEARCH DEBUG | profile_missing for employee_id={emp.employee_id} profile_id={emp.profile_id}")
+                    else:
+                        print(f"🔎 EMP-SEARCH DEBUG | profile_found employee_id={emp.employee_id} name='{(profile.first_name or '')} {(profile.last_name or '')}'.strip()")
+                    # Always include normalized name fields for renderer
+                    employee_data.append({
+                        "employee_id": emp.employee_id,
+                        "employee_number": emp.employee_number,
+                        "job_title": emp.job_title,
+                        "department": emp.department,
+                        "employment_type": emp.employment_type,
+                        "full_time_part_time": emp.full_time_part_time,
+                        "committed_hours": emp.committed_hours,
+                        "hire_date": emp.hire_date.isoformat() if emp.hire_date else None,
+                        "rate_type": emp.rate_type,
+                        "rate": float(emp.rate) if emp.rate else None,
+                        "currency": emp.currency,
+                        # normalized name fields (may be None if profile missing)
+                        "employee_name": (f"{(profile.first_name or '').strip()} {(profile.last_name or '').strip()}".strip() if profile else None),
+                        "profile": {
+                            "first_name": profile.first_name if profile else None,
+                            "last_name": profile.last_name if profile else None,
+                            "email": profile.email if profile else None,
+                            "full_name": (f"{(profile.first_name or '').strip()} {(profile.last_name or '').strip()}".strip() if profile else None)
+                        }
+                    })
+                
+                # Format the salary query results using the same logic as regular search
+                formatted_message = f"📋 Found {len(employee_data)} employees matching salary criteria: {search_term}\n\n"
+                
+                for i, emp_data in enumerate(employee_data, 1):
+                    # Create profile dict for consistency with regular search formatting
+                    profile = {
+                        'full_name': f"{emp_data.get('first_name', '')} {emp_data.get('last_name', '')}".strip(),
+                        'email': emp_data.get('email', 'N/A')
+                    }
+                    
+                    formatted_message += f"**{i}. {profile.get('full_name', 'Unknown')}**\n"
+                    formatted_message += f"   - Employee Number: {emp_data.get('employee_number', 'N/A')}\n"
+                    formatted_message += f"   - Job Title: {emp_data.get('job_title', 'N/A')}\n"
+                    formatted_message += f"   - Department: {emp_data.get('department', 'N/A')}\n"
+                    formatted_message += f"   - Employment Type: {emp_data.get('employment_type', 'N/A')}\n"
+                    formatted_message += f"   - Work Schedule: {emp_data.get('full_time_part_time', 'N/A')}\n"
+                    formatted_message += f"   - Hire Date: {emp_data.get('hire_date', 'N/A')}\n"
+                    formatted_message += f"   - Rate: {emp_data.get('rate', 'N/A')} {emp_data.get('rate_type', '')} {emp_data.get('currency', '')}\n"
+                    formatted_message += f"   - Email: {profile.get('email', 'N/A')}\n\n"
+                
+                print(f"🔎 EMP-SEARCH DEBUG | salary_query_response count={len(employee_data)} include_profile_keys={all('profile' in e for e in employee_data)} include_employee_name_keys={all('employee_name' in e for e in employee_data)}")
+                return EmployeeToolResult(
+                    success=True,
+                    message=formatted_message,
+                    data={
+                        "employees": employee_data,
+                        "count": len(employee_data),
+                        "search_term": search_term
+                    }
+                )
+            
             # Check if this is a person name lookup (First Last format)
             import re
             person_name_pattern = r'^[A-Z][a-z]+\s+[A-Z][a-z]+$'
@@ -992,13 +1248,66 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                             }
                         }]
                         
+                        # Get complete employee details including documents
+                        storage_service = SupabaseStorageService()
+                        
+                        # Format the employee details as a readable message
+                        details_message = f"""📋 Employee Details for {profile.full_name}
+
+**Basic Information:**
+- Employee ID: {employee.employee_id}
+- Employee Number: {employee.employee_number}
+- Job Title: {employee.job_title}
+- Department: {employee.department}
+- Employment Type: {employee.employment_type}
+
+**Work Details:**
+- Work Schedule: {employee.full_time_part_time}
+- Committed Hours: {employee.committed_hours}
+- Hire Date: {str(employee.hire_date) if employee.hire_date else 'Not set'}
+
+**Compensation:**
+- Rate: {float(employee.rate) if employee.rate else 'Not set'} {employee.rate_type} {employee.currency}
+
+**Contact Information:**
+- Full Name: {profile.full_name}
+- First Name: {profile.first_name}
+- Last Name: {profile.last_name}
+- Email: {profile.email}
+
+**Documents:**
+- NDA Document: {'[Download NDA Document](' + storage_service.get_employee_nda_document_url(employee.nda_document_file_path) + ')' if employee.nda_document_file_path else 'Not uploaded'} {f'({employee.nda_document_filename})' if employee.nda_document_filename else ''}
+- Contract Document: {'[Download Contract Document](' + storage_service.get_employee_contract_document_url(employee.contract_document_file_path) + ')' if employee.contract_document_file_path else 'Not uploaded'} {f'({employee.contract_document_filename})' if employee.contract_document_filename else ''}"""
+
                         return EmployeeToolResult(
                             success=True,
-                            message=f"📋 Found 1 employee matching '{search_term}'. Please format this data to include ALL fields: Employee Number, Job Title, Department, Employment Type, Work Schedule, Hire Date, Rate, and Email address from the profile data.",
+                            message=details_message,
                             data={
-                                "employees": employee_list,
-                                "count": 1,
-                                "search_term": search_term
+                                "employee_id": employee.employee_id,
+                                "employee_number": employee.employee_number,
+                                "job_title": employee.job_title,
+                                "department": employee.department,
+                                "employment_type": employee.employment_type,
+                                "work_schedule": employee.full_time_part_time,
+                                "committed_hours": employee.committed_hours,
+                                "hire_date": str(employee.hire_date) if employee.hire_date else None,
+                                "rate_type": employee.rate_type,
+                                "rate": float(employee.rate) if employee.rate else None,
+                                "currency": employee.currency,
+                                "email": profile.email,
+                                "full_name": profile.full_name,
+                                "first_name": profile.first_name,
+                                "last_name": profile.last_name,
+                                "nda_document": {
+                                    "filename": employee.nda_document_filename,
+                                    "has_document": employee.nda_document_file_path is not None,
+                                    "download_url": storage_service.get_employee_nda_document_url(employee.nda_document_file_path) if employee.nda_document_file_path else None
+                                },
+                                "contract_document": {
+                                    "filename": employee.contract_document_filename,
+                                    "has_document": employee.contract_document_file_path is not None,
+                                    "download_url": storage_service.get_employee_contract_document_url(employee.contract_document_file_path) if employee.contract_document_file_path else None
+                                }
                             }
                         )
                     else:
@@ -1110,10 +1419,13 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
             # Replace the entire employee processing section with this:
             employee_list = []
             for emp, profile in employees_list:
+                # Initialize storage service for document URLs
+                storage_service = SupabaseStorageService()
+                
                 # Build employee data with profile information
                 employee_data = {
                 "employee_id": emp.employee_id,
-                    "profile_id": str(emp.profile_id),  # Keep for internal operations
+                "profile_id": str(emp.profile_id),  # Keep for internal operations
                 "employee_number": emp.employee_number,
                 "job_title": emp.job_title,
                 "department": emp.department,
@@ -1129,14 +1441,65 @@ async def search_employees_tool(search_term: str, limit: int = 50) -> EmployeeTo
                         "last_name": profile.last_name,
                         "email": profile.email,
                         "full_name": f"{profile.first_name} {profile.last_name}" if profile.first_name and profile.last_name else profile.first_name or profile.last_name or "Unknown"
-                    }
+                    },
+                "nda_document": {
+                    "filename": emp.nda_document_filename,
+                    "has_document": emp.nda_document_file_path is not None,
+                    "download_url": storage_service.get_employee_nda_document_url(emp.nda_document_file_path) if emp.nda_document_file_path else None
+                },
+                "contract_document": {
+                    "filename": emp.contract_document_filename,
+                    "has_document": emp.contract_document_file_path is not None,
+                    "download_url": storage_service.get_employee_contract_document_url(emp.contract_document_file_path) if emp.contract_document_file_path else None
+                }
                 }
                 # Add to employee list without any additional filtering
                 employee_list.append(employee_data)
         
+        # Format the employee data for display
+        if not employee_list:
+            return EmployeeToolResult(
+                success=True,
+                message=f"📋 Found 0 employees matching '{search_term}'",
+                data={
+                    "employees": [],
+                    "count": 0,
+                    "search_term": search_term
+                }
+            )
+        
+        # Build formatted message with all employee details
+        formatted_message = f"📋 Found {len(employee_list)} employees matching '{search_term}':\n\n"
+        
+        for i, emp_data in enumerate(employee_list, 1):
+            profile = emp_data.get('profile', {})
+            formatted_message += f"**{i}. {profile.get('full_name', 'Unknown')}**\n"
+            formatted_message += f"   - Employee Number: {emp_data.get('employee_number', 'N/A')}\n"
+            formatted_message += f"   - Job Title: {emp_data.get('job_title', 'N/A')}\n"
+            formatted_message += f"   - Department: {emp_data.get('department', 'N/A')}\n"
+            formatted_message += f"   - Employment Type: {emp_data.get('employment_type', 'N/A')}\n"
+            formatted_message += f"   - Work Schedule: {emp_data.get('full_time_part_time', 'N/A')}\n"
+            formatted_message += f"   - Hire Date: {emp_data.get('hire_date', 'N/A')}\n"
+            formatted_message += f"   - Rate: {emp_data.get('rate', 'N/A')} {emp_data.get('rate_type', '')} {emp_data.get('currency', '')}\n"
+            formatted_message += f"   - Email: {profile.get('email', 'N/A')}\n"
+            
+            # Add document information
+            nda_doc = emp_data.get('nda_document', {})
+            contract_doc = emp_data.get('contract_document', {})
+            
+            formatted_message += f"   - NDA Document: {'[Download NDA Document](' + nda_doc.get('download_url', '') + ')' if nda_doc.get('has_document') else 'Not uploaded'}"
+            if nda_doc.get('filename'):
+                formatted_message += f" ({nda_doc.get('filename')})"
+            formatted_message += "\n"
+            
+            formatted_message += f"   - Contract Document: {'[Download Contract Document](' + contract_doc.get('download_url', '') + ')' if contract_doc.get('has_document') else 'Not uploaded'}"
+            if contract_doc.get('filename'):
+                formatted_message += f" ({contract_doc.get('filename')})"
+            formatted_message += "\n\n"
+        
         return EmployeeToolResult(
             success=True,
-                message=f"📋 Found {len(employee_list)} employees matching '{search_term}'. Please format this data to include ALL fields: Employee Number, Job Title, Department, Employment Type, Work Schedule, Hire Date, Rate, and Email address from the profile data.",
+            message=formatted_message,
             data={
                 "employees": employee_list,
                 "count": len(employee_list),
@@ -1197,8 +1560,8 @@ async def get_employee_details_tool(employee_id: int) -> EmployeeToolResult:
                 "rate_type": employee.rate_type,
                 "rate": float(employee.rate) if employee.rate else None,
                 "currency": employee.currency,
-                "nda_file_link": employee.nda_file_link,
-                "contract_file_link": employee.contract_file_link,
+                "nda_document_file_path": employee.nda_document_file_path,
+                "contract_document_file_path": employee.contract_document_file_path,
                 "nda_document": {
                     "filename": employee.nda_document_filename,
                     "file_size": employee.nda_document_file_size,
@@ -1238,14 +1601,108 @@ async def get_employee_details_tool(employee_id: int) -> EmployeeToolResult:
         )
 
 
-@cached_search_operation(cache_ttl=300, track_performance=True)
+@cached_search_operation(cache_ttl=30, track_performance=True)  # Reduced TTL to 30 seconds
+async def get_employees_by_committed_hours_tool(min_hours: int) -> EmployeeToolResult:
+    """Tool for getting employees with committed hours greater than or equal to min_hours"""
+    try:
+        # Always create a fresh database session to avoid session closure issues
+        async with get_ai_db() as session:
+            # Get employees with committed hours >= min_hours
+            check_employees = await session.execute(
+                select(Employee)
+                .join(User, Employee.profile_id == User.user_id)
+                .filter(Employee.committed_hours >= min_hours)
+            )
+            employees = check_employees.scalars().all()
+            
+            # Step 1: Get all profile IDs that we need
+            profile_ids = [emp.profile_id for emp in employees if emp.profile_id]
+
+            # Step 2: Fetch all profiles in one query
+            profiles_result = await session.execute(
+                select(User).filter(User.user_id.in_(profile_ids))
+            )
+            profiles_dict = {profile.user_id: profile for profile in profiles_result.scalars().all()}
+
+            # Step 3: Build employee list using the profiles dictionary
+            employee_list = []
+            for emp in employees:
+                profile = profiles_dict.get(emp.profile_id)
+                
+                # Get document information with download URLs
+                storage_service = SupabaseStorageService()
+                
+                nda_doc = {
+                    "filename": emp.nda_document_filename,
+                    "file_size": emp.nda_document_file_size,
+                    "mime_type": emp.nda_document_mime_type,
+                    "uploaded_at": emp.nda_document_uploaded_at.isoformat() if emp.nda_document_uploaded_at else None,
+                    "has_document": emp.nda_document_file_path is not None,
+                    "download_url": storage_service.get_employee_nda_document_url(emp.nda_document_file_path) if emp.nda_document_file_path else None
+                }
+                
+                contract_doc = {
+                    "filename": emp.contract_document_filename,
+                    "file_size": emp.contract_document_file_size,
+                    "mime_type": emp.contract_document_mime_type,
+                    "uploaded_at": emp.contract_document_uploaded_at.isoformat() if emp.contract_document_uploaded_at else None,
+                    "has_document": emp.contract_document_file_path is not None,
+                    "download_url": storage_service.get_employee_contract_document_url(emp.contract_document_file_path) if emp.contract_document_file_path else None
+                }
+                
+                employee_list.append({
+                    "employee_id": emp.employee_id,
+                    "profile_id": str(emp.profile_id),
+                    "employee_name": profile.full_name if profile else "Unknown",
+                    "employee_number": emp.employee_number,
+                    "job_title": emp.job_title,
+                    "department": emp.department,
+                    "employment_type": emp.employment_type,
+                    "full_time_part_time": emp.full_time_part_time,
+                    "committed_hours": emp.committed_hours,
+                    "hire_date": str(emp.hire_date) if emp.hire_date else None,
+                    "termination_date": str(emp.termination_date) if emp.termination_date else None,
+                    "rate_type": emp.rate_type,
+                    "rate": float(emp.rate) if emp.rate else None,
+                    "currency": emp.currency,
+                    "nda_document": nda_doc,
+                    "contract_document": contract_doc,
+                    "profile": {
+                        "first_name": profile.first_name if profile else None,
+                        "last_name": profile.last_name if profile else None,
+                        "email": profile.email if profile else None,
+                        "full_name": profile.full_name if profile else "Unknown"
+                    } if profile else {
+                        "first_name": None,
+                        "last_name": None,
+                        "email": None,
+                        "full_name": "Unknown"
+                    }
+                })
+            
+            return EmployeeToolResult(
+                success=True,
+                message=f"📋 Found {len(employee_list)} employees with committed hours >= {min_hours}",
+                data={
+                    "employees": employee_list,
+                    "count": len(employee_list),
+                    "min_hours": min_hours
+                }
+            )
+        
+    except Exception as e:
+        return EmployeeToolResult(
+            success=False,
+            message=f"❌ Failed to get employees by committed hours: {str(e)}"
+        )
+
+
 async def get_all_employees_tool() -> EmployeeToolResult:
     """Tool for getting all employees with basic information"""
     try:
         # Always create a fresh database session to avoid session closure issues
         async with get_ai_db() as session:
-        
-        # Get all employees with profile information
+            # Get all employees with profile information
             check_employees = await session.execute(select(Employee).join(User, Employee.profile_id == User.user_id))
             employees = check_employees.scalars().all()
             
@@ -1262,41 +1719,66 @@ async def get_all_employees_tool() -> EmployeeToolResult:
             employee_list = []
             for emp in employees:
                 profile = profiles_dict.get(emp.profile_id)
-            
-            employee_list.append({
-                "employee_id": emp.employee_id,
-                    "profile_id": str(emp.profile_id),  # Keep for internal operations
-                "employee_number": emp.employee_number,
-                "job_title": emp.job_title,
-                "department": emp.department,
-                "employment_type": emp.employment_type,
-                "full_time_part_time": emp.full_time_part_time,
-                "hire_date": str(emp.hire_date) if emp.hire_date else None,
-                "termination_date": str(emp.termination_date) if emp.termination_date else None,
-                "rate_type": emp.rate_type,
-                "rate": float(emp.rate) if emp.rate else None,
-                "currency": emp.currency,
-                "profile": {
-                    "first_name": profile.first_name if profile else None,
-                    "last_name": profile.last_name if profile else None,
-                    "email": profile.email if profile else None,
-                    "full_name": profile.full_name if profile else "Unknown"
-                } if profile else {
-                    "first_name": None,
-                    "last_name": None,
-                    "email": None,
-                    "full_name": "Unknown"
+                
+                # Get document information with download URLs
+                storage_service = SupabaseStorageService()
+                
+                nda_doc = {
+                    "filename": emp.nda_document_filename,
+                    "file_size": emp.nda_document_file_size,
+                    "mime_type": emp.nda_document_mime_type,
+                    "uploaded_at": emp.nda_document_uploaded_at.isoformat() if emp.nda_document_uploaded_at else None,
+                    "has_document": emp.nda_document_file_path is not None,
+                    "download_url": storage_service.get_employee_nda_document_url(emp.nda_document_file_path) if emp.nda_document_file_path else None
                 }
-            })
-        
-        return EmployeeToolResult(
-            success=True,
-            message=f"📋 Found {len(employee_list)} employees in the system",
-            data={
-                "employees": employee_list,
-                "count": len(employee_list)
-            }
-        )
+                
+                contract_doc = {
+                    "filename": emp.contract_document_filename,
+                    "file_size": emp.contract_document_file_size,
+                    "mime_type": emp.contract_document_mime_type,
+                    "uploaded_at": emp.contract_document_uploaded_at.isoformat() if emp.contract_document_uploaded_at else None,
+                    "has_document": emp.contract_document_file_path is not None,
+                    "download_url": storage_service.get_employee_contract_document_url(emp.contract_document_file_path) if emp.contract_document_file_path else None
+                }
+                
+                employee_list.append({
+                    "employee_id": emp.employee_id,
+                    "profile_id": str(emp.profile_id),  # Keep for internal operations
+                    "employee_name": profile.full_name if profile else "Unknown",  # Add employee_name field
+                    "employee_number": emp.employee_number,
+                    "job_title": emp.job_title,
+                    "department": emp.department,
+                    "employment_type": emp.employment_type,
+                    "full_time_part_time": emp.full_time_part_time,
+                    "committed_hours": emp.committed_hours,  # Add committed_hours field
+                    "hire_date": str(emp.hire_date) if emp.hire_date else None,
+                    "termination_date": str(emp.termination_date) if emp.termination_date else None,
+                    "rate_type": emp.rate_type,
+                    "rate": float(emp.rate) if emp.rate else None,
+                    "currency": emp.currency,
+                    "nda_document": nda_doc,
+                    "contract_document": contract_doc,
+                    "profile": {
+                        "first_name": profile.first_name if profile else None,
+                        "last_name": profile.last_name if profile else None,
+                        "email": profile.email if profile else None,
+                        "full_name": profile.full_name if profile else "Unknown"
+                    } if profile else {
+                        "first_name": None,
+                        "last_name": None,
+                        "email": None,
+                        "full_name": "Unknown"
+                    }
+                })
+            
+            return EmployeeToolResult(
+                success=True,
+                message=f"📋 Found {len(employee_list)} employees in the system",
+                data={
+                    "employees": employee_list,
+                    "count": len(employee_list)
+                }
+            )
         
     except Exception as e:
         return EmployeeToolResult(
@@ -1361,7 +1843,15 @@ async def delete_employee_tool(params: DeleteEmployeeParams, context: Dict[str, 
                     )
                 
                 if len(profiles) > 1:
-                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    profile_names = []
+                    for p in profiles:
+                        # Handle null last_name properly
+                        if p.last_name:
+                            full_name = f"{p.first_name} {p.last_name}"
+                        else:
+                            full_name = p.first_name or "Unknown"
+                        profile_names.append(f"{full_name} ({p.email})")
+                    
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ Multiple employees found with name '{params.employee_name}': {', '.join(profile_names)}. Please be more specific or use employee ID."
@@ -1393,7 +1883,10 @@ async def delete_employee_tool(params: DeleteEmployeeParams, context: Dict[str, 
             # Store employee details for response
             employee_name = "Unknown"
             if hasattr(employee, 'profile') and employee.profile:
-                employee_name = f"{employee.profile.first_name} {employee.profile.last_name}"
+                if employee.profile.last_name:
+                    employee_name = f"{employee.profile.first_name} {employee.profile.last_name}"
+                else:
+                    employee_name = employee.profile.first_name or "Unknown"
             
             # Delete associated documents before deleting employee record
             storage_service = SupabaseStorageService()
@@ -1537,7 +2030,14 @@ async def upload_employee_document_tool(params: UploadEmployeeDocumentParams, co
                     )
                 
                 if len(profiles) > 1:
-                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    profile_names = []
+                    for p in profiles:
+                        # Handle null last_name properly
+                        if p.last_name:
+                            full_name = f"{p.first_name} {p.last_name}"
+                        else:
+                            full_name = p.first_name or "Unknown"
+                        profile_names.append(f"{full_name} ({p.email})")
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ Multiple employees found with name '{params.employee_name}': {', '.join(profile_names)}. Please be more specific with the employee name."
@@ -1697,20 +2197,20 @@ async def upload_employee_document_tool(params: UploadEmployeeDocumentParams, co
             
             # Update employee record with document metadata
             if params.document_type == "nda":
-                employee.nda_document_bucket_name = "employee-nda-documents"
+                # Bucket name is defaulted in database, no need to set
                 employee.nda_document_file_size = file_size
                 employee.nda_document_mime_type = params.mime_type
                 employee.nda_document_uploaded_at = uploaded_at
-                employee.nda_file_link = file_path  # Keep legacy field
+                # Legacy field removed - using nda_document_file_path only
                 # Update new metadata fields
                 employee.nda_document_filename = params.filename
                 employee.nda_document_file_path = file_path
             elif params.document_type == "contract":
-                employee.contract_document_bucket_name = "employee-contract-documents"
+                # Bucket name is defaulted in database, no need to set
                 employee.contract_document_file_size = file_size
                 employee.contract_document_mime_type = params.mime_type
                 employee.contract_document_uploaded_at = uploaded_at
-                employee.contract_file_link = file_path  # Keep legacy field
+                # Legacy field removed - using contract_document_file_path only
                 # Update new metadata fields
                 employee.contract_document_filename = params.filename
                 employee.contract_document_file_path = file_path
@@ -1724,7 +2224,13 @@ async def upload_employee_document_tool(params: UploadEmployeeDocumentParams, co
             # Get employee name for response
             profile_result = await session.execute(select(User).filter(User.user_id == employee.profile_id))
             profile = profile_result.scalar_one_or_none()
-            employee_name = f"{profile.first_name} {profile.last_name}" if profile else "Unknown"
+            if profile and profile.first_name:
+                if profile.last_name:
+                    employee_name = f"{profile.first_name} {profile.last_name}"
+                else:
+                    employee_name = profile.first_name
+            else:
+                employee_name = "Unknown"
             
             # Get download URL
             download_url = ""
@@ -1802,7 +2308,14 @@ async def delete_employee_document_tool(params: DeleteEmployeeDocumentParams, co
                     )
                 
                 if len(profiles) > 1:
-                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    profile_names = []
+                    for p in profiles:
+                        # Handle null last_name properly
+                        if p.last_name:
+                            full_name = f"{p.first_name} {p.last_name}"
+                        else:
+                            full_name = p.first_name or "Unknown"
+                        profile_names.append(f"{full_name} ({p.email})")
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ Multiple employees found with name '{params.employee_name}': {', '.join(profile_names)}. Please be more specific."
@@ -1831,12 +2344,12 @@ async def delete_employee_document_tool(params: DeleteEmployeeDocumentParams, co
                 )
             
             # Check if document exists
-            if params.document_type == "nda" and not employee.nda_file_link:
+            if params.document_type == "nda" and not employee.nda_document_file_path:
                 return EmployeeToolResult(
                     success=False,
                     message="❌ No NDA document found for this employee."
                 )
-            elif params.document_type == "contract" and not employee.contract_file_link:
+            elif params.document_type == "contract" and not employee.contract_document_file_path:
                 return EmployeeToolResult(
                     success=False,
                     message="❌ No contract document found for this employee."
@@ -1845,7 +2358,7 @@ async def delete_employee_document_tool(params: DeleteEmployeeDocumentParams, co
             # Delete from storage
             storage_service = SupabaseStorageService()
             
-            file_path = employee.nda_file_link if params.document_type == "nda" else employee.contract_file_link
+            file_path = employee.nda_document_file_path if params.document_type == "nda" else employee.contract_document_file_path
             delete_success = False
             
             if params.document_type == "nda":
@@ -1861,8 +2374,8 @@ async def delete_employee_document_tool(params: DeleteEmployeeDocumentParams, co
             
             # Clear document fields
             if params.document_type == "nda":
-                employee.nda_file_link = None
-                employee.nda_document_bucket_name = None
+                # Legacy field removed - using nda_document_file_path only
+                # Bucket name is defaulted in database, no need to clear
                 employee.nda_document_file_size = None
                 employee.nda_document_mime_type = None
                 employee.nda_document_uploaded_at = None
@@ -1871,8 +2384,8 @@ async def delete_employee_document_tool(params: DeleteEmployeeDocumentParams, co
                 employee.nda_document_filename = None
                 employee.nda_document_file_path = None
             elif params.document_type == "contract":
-                employee.contract_file_link = None
-                employee.contract_document_bucket_name = None
+                # Legacy field removed - using contract_document_file_path only
+                # Bucket name is defaulted in database, no need to clear
                 employee.contract_document_file_size = None
                 employee.contract_document_mime_type = None
                 employee.contract_document_uploaded_at = None
@@ -1889,7 +2402,13 @@ async def delete_employee_document_tool(params: DeleteEmployeeDocumentParams, co
             # Get employee name for response
             profile_result = await session.execute(select(User).filter(User.user_id == employee.profile_id))
             profile = profile_result.scalar_one_or_none()
-            employee_name = f"{profile.first_name} {profile.last_name}" if profile else "Unknown"
+            if profile and profile.first_name:
+                if profile.last_name:
+                    employee_name = f"{profile.first_name} {profile.last_name}"
+                else:
+                    employee_name = profile.first_name
+            else:
+                employee_name = "Unknown"
             
             return EmployeeToolResult(
                 success=True,
@@ -1946,7 +2465,14 @@ async def get_employee_document_tool(params: GetEmployeeDocumentParams, context:
                     )
                 
                 if len(profiles) > 1:
-                    profile_names = [f"{p.first_name} {p.last_name} ({p.email})" for p in profiles]
+                    profile_names = []
+                    for p in profiles:
+                        # Handle null last_name properly
+                        if p.last_name:
+                            full_name = f"{p.first_name} {p.last_name}"
+                        else:
+                            full_name = p.first_name or "Unknown"
+                        profile_names.append(f"{full_name} ({p.email})")
                     return EmployeeToolResult(
                         success=False,
                         message=f"❌ Multiple employees found with name '{params.employee_name}': {', '.join(profile_names)}. Please be more specific."
@@ -1977,12 +2503,18 @@ async def get_employee_document_tool(params: GetEmployeeDocumentParams, context:
             # Get employee name
             profile_result = await session.execute(select(User).filter(User.user_id == employee.profile_id))
             profile = profile_result.scalar_one_or_none()
-            employee_name = f"{profile.first_name} {profile.last_name}" if profile else "Unknown"
+            if profile and profile.first_name:
+                if profile.last_name:
+                    employee_name = f"{profile.first_name} {profile.last_name}"
+                else:
+                    employee_name = profile.first_name
+            else:
+                employee_name = "Unknown"
             
             # Check if document exists and build response
             storage_service = SupabaseStorageService()
             if params.document_type == "nda":
-                if not employee.nda_file_link:
+                if not employee.nda_document_file_path:
                     return EmployeeToolResult(
                         success=True,
                         message=f"❌ No NDA document found for {employee_name}",
@@ -1994,7 +2526,7 @@ async def get_employee_document_tool(params: GetEmployeeDocumentParams, context:
                         }
                     )
                 
-                download_url = storage_service.get_employee_nda_document_url(employee.nda_file_link)
+                download_url = storage_service.get_employee_nda_document_url(employee.nda_document_file_path)
                 
                 return EmployeeToolResult(
                     success=True,
@@ -2005,7 +2537,7 @@ async def get_employee_document_tool(params: GetEmployeeDocumentParams, context:
                         "document_type": "nda",
                         "has_document": True,
                         "filename": employee.nda_document_mime_type.split('/')[-1] if employee.nda_document_mime_type else "nda_document",
-                        "file_path": employee.nda_file_link,
+                        "file_path": employee.nda_document_file_path,
                         "file_size": employee.nda_document_file_size,
                         "mime_type": employee.nda_document_mime_type,
                         "uploaded_at": employee.nda_document_uploaded_at,
@@ -2015,7 +2547,7 @@ async def get_employee_document_tool(params: GetEmployeeDocumentParams, context:
                 )
                 
             elif params.document_type == "contract":
-                if not employee.contract_file_link:
+                if not employee.contract_document_file_path:
                     return EmployeeToolResult(
                         success=True,
                         message=f"❌ No contract document found for {employee_name}",
@@ -2027,7 +2559,7 @@ async def get_employee_document_tool(params: GetEmployeeDocumentParams, context:
                         }
                     )
                 
-                download_url = storage_service.get_employee_contract_document_url(employee.contract_file_link)
+                download_url = storage_service.get_employee_contract_document_url(employee.contract_document_file_path)
                 
                 return EmployeeToolResult(
                     success=True,
@@ -2038,7 +2570,7 @@ async def get_employee_document_tool(params: GetEmployeeDocumentParams, context:
                         "document_type": "contract",
                         "has_document": True,
                         "filename": employee.contract_document_mime_type.split('/')[-1] if employee.contract_document_mime_type else "contract_document",
-                        "file_path": employee.contract_file_link,
+                        "file_path": employee.contract_document_file_path,
                         "file_size": employee.contract_document_file_size,
                         "mime_type": employee.contract_document_mime_type,
                         "uploaded_at": employee.contract_document_uploaded_at,

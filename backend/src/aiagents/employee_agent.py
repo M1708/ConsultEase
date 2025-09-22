@@ -8,7 +8,7 @@ class EmployeeAgent:
     """
     def __init__(self):
         """Initializes the agent with its specific instructions and tool schemas."""
-        self.instructions = "You are Milo, an expert AI assistant for employee and HR management."
+        self.instructions = "You are Core, an expert AI assistant for employee and HR management."
         self.tools = self._get_tool_schemas()
 
     def _get_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -36,8 +36,7 @@ class EmployeeAgent:
                             "rate_type": {"type": "string", "enum": ["hourly", "salary", "project_based"], "description": "Compensation type"},
                             "rate": {"type": "number", "description": "Rate amount"},
                             "currency": {"type": "string", "description": "Currency code"},
-                            "nda_file_link": {"type": "string", "description": "Link to NDA document"},
-                            "contract_file_link": {"type": "string", "description": "Link to employment contract document"},
+                            # Legacy fields removed - using nda_document_file_path and contract_document_file_path
                             "nda_document_data": {"type": "string", "description": "Base64 encoded NDA document data for upload during creation"},
                             "nda_document_filename": {"type": "string", "description": "NDA document filename"},
                             "nda_document_size": {"type": "integer", "description": "NDA document file size in bytes"},
@@ -71,8 +70,7 @@ class EmployeeAgent:
                             "rate_type": {"type": "string", "enum": ["hourly", "salary", "project_based"], "description": "New compensation type"},
                             "rate": {"type": "number", "description": "New rate amount"},
                             "currency": {"type": "string", "description": "New currency code"},
-                            "nda_file_link": {"type": "string", "description": "New link to NDA document"},
-                            "contract_file_link": {"type": "string", "description": "New link to employment contract document"}
+                            # Legacy fields removed - using nda_document_file_path and contract_document_file_path
                         },
                         "required": ["employee_id"]
                     }
@@ -98,8 +96,7 @@ class EmployeeAgent:
                             "rate_type": {"type": "string", "description": "New compensation type: hourly, salary, or project_based"},
                             "rate": {"type": "number", "description": "New rate amount (e.g., 85 for $85 hourly, 12000 for $12,000 monthly)"},
                             "currency": {"type": "string", "description": "New currency code (defaults to USD)"},
-                            "nda_file_link": {"type": "string", "description": "New link to NDA document"},
-                            "contract_file_link": {"type": "string", "description": "New link to employment contract document"}
+                            # Legacy fields removed - using nda_document_file_path and contract_document_file_path
                         },
                         "required": ["employee_name"]
                     }
@@ -145,6 +142,20 @@ class EmployeeAgent:
             {
                 "type": "function",
                 "function": {
+                    "name": "get_employees_by_committed_hours",
+                    "description": "Get employees with committed hours greater than or equal to the specified minimum hours. Use this for queries like 'show employees with committed hours more than 20' or 'employees with hours >= 25'.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "min_hours": {"type": "integer", "description": "Minimum committed hours per week to filter by (e.g., 20 for 'more than 20 hours')"}
+                        },
+                        "required": ["min_hours"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "search_profiles_by_name",
                     "description": "Search for user profiles by name. DO NOT USE THIS FOR EMPLOYEE CREATION - use create_employee_from_details instead. This tool is ONLY for profile lookup when the user specifically asks to 'find profile for [name]' without any creation intent.",
                     "parameters": {
@@ -177,8 +188,7 @@ class EmployeeAgent:
                             "rate": {"type": "number", "description": "Rate amount (e.g., 75 for $75 hourly, 10000 for $10,000 monthly)"},
                             "salary": {"type": "number", "description": "Monthly salary amount in numbers (e.g., 10000 for $10,000) - use this for salary-based compensation"},
                             "currency": {"type": "string", "description": "Currency code (defaults to USD)"},
-                            "nda_file_link": {"type": "string", "description": "Link to NDA document"},
-                            "contract_file_link": {"type": "string", "description": "Link to employment contract document"},
+                            # Legacy fields removed - using nda_document_file_path and contract_document_file_path
                             "nda_document_data": {"type": "string", "description": "Base64 encoded NDA document data for upload during creation"},
                             "nda_document_filename": {"type": "string", "description": "NDA document filename"},
                             "nda_document_size": {"type": "integer", "description": "NDA document file size in bytes"},

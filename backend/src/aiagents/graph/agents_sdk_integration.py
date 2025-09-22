@@ -6,6 +6,7 @@ and the existing LangGraph workflow system, enabling hybrid operation.
 """
 
 import asyncio
+import traceback
 from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 
@@ -54,7 +55,7 @@ class HybridAgentOrchestrator:
 
         except Exception as e:
             print(f"❌ Failed to initialize SDK agents: {e}")
-            import traceback
+            
             print(f"🔍 SDK INIT: Full traceback: {traceback.format_exc()}")
             return False
 

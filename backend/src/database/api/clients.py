@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typing import List
 from src.database.core.database import get_db
 from src.database.core.models import Client, Contract
@@ -36,18 +36,37 @@ async def search_clients_by_name(search_term: str, db: AsyncSession = Depends(ge
     """Search clients by name or industry"""
     result = await db.execute(
         select(Client).filter(
-            Client.client_name.ilike(f"%{search_term}%") |
-            Client.industry.ilike(f"%{search_term}%")
+            text("lower(client_name) LIKE lower(:search_term) OR lower(industry) LIKE lower(:search_term)")
+            .params(search_term=f"%{search_term}%")
         )
     )
     return result.scalars().all()
 
 async def get_client_by_name(client_name: str, session: AsyncSession) -> Client:
     """Helper function to get client by name (for use in tools)"""
+    # First try exact match
     result = await session.execute(
-        select(Client).filter(Client.client_name.ilike(f"%{client_name}%"))
+        select(Client).filter(text("lower(client_name) = lower(:client_name)").params(client_name=client_name))
     )
-    return result.scalar_one_or_none()
+    client = result.scalar_one_or_none()
+    
+    if client:
+        return client
+    
+    # If no exact match, try case-insensitive partial match
+    result = await session.execute(
+        select(Client).filter(text("lower(client_name) LIKE lower(:client_name)").params(client_name=f"%{client_name}%"))
+    )
+    clients = result.scalars().all()
+    
+    if not clients:
+        return None
+    elif len(clients) == 1:
+        return clients[0]
+    else:
+        # Multiple clients found - return the most recent one
+        print(f"🔍 DEBUG: Multiple clients found for '{client_name}', returning most recent")
+        return max(clients, key=lambda c: c.created_at or c.updated_at)
 
 async def create_client_internal(client: ClientCreate, session: AsyncSession, user_id: str) -> Client:
     """Internal function to create client (for use by AI agents and tools)"""

@@ -7,7 +7,9 @@ import re
 from openai import OpenAI
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-
+import hashlib
+import traceback
+   
 from .state import AgentState
 from .context_extractor import context_extractor
 from ..memory.conversation_memory import ConversationMemoryManager
@@ -23,7 +25,20 @@ from ..client_agent import ClientAgent
 from ..deliverable_agent import DeliverableAgent
 from ..time_agent import TimeTrackerAgent
 from ..user_agent import UserAgent
+# Import the tool function
+from ..tools.contract_tools import (
+    update_contract_tool, delete_contract_tool,
+    smart_create_contract_tool, upload_contract_document_tool
+)
+from ..tools.contract_tools import DeleteContractParams
+from ..tools.contract_tools import UpdateContractParams
+from ..tools.contract_tools import UploadContractDocumentParams
+from src.aiagents.services.file_cache import file_cache
 
+from src.database.core.database import get_ai_db
+from src.database.core.models import Contract, Client
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 class EnhancedAgentNodeExecutor:
     """
@@ -297,7 +312,7 @@ class EnhancedAgentNodeExecutor:
         except Exception as e:
             print(f"Error generating dynamic instructions: {e}")
             # Fallback to basic template
-            return f"You are Milo, a {agent_name.replace('_', ' ')} specialist."
+            return f"You are Core, a {agent_name.replace('_', ' ')} specialist."
 
     async def _prepare_messages_optimized(
         self,
@@ -316,18 +331,19 @@ class EnhancedAgentNodeExecutor:
                 file_info = state['context']['file_info']
                 context_info.append(f"File attached: {file_info.get('filename', 'unknown')} ({file_info.get('file_size', 0)} bytes)")
                 context_info.append(f"File type: {file_info.get('mime_type', 'unknown')}")
-                context_info.append(f"File data available: {'Yes' if file_info.get('file_data') else 'No'}")
-
-                # CRITICAL: Tell agent that file data is available (tool wrapper will handle the actual data)
-                if file_info.get('file_data'):
-                    context_info.append(f"FILE_DATA_AVAILABLE: Yes - Tool wrapper will access the real data")
+                
+                # Check if file reference is available (optimized approach)
+                if file_info.get('file_ref_id'):
+                    context_info.append(f"FILE_REFERENCE_AVAILABLE: Yes - File cached with ref_id: {file_info.get('file_ref_id')}")
                     context_info.append(f"FILENAME: {file_info.get('filename')}")
                     context_info.append(f"FILE_SIZE: {file_info.get('file_size')}")
                     context_info.append(f"MIME_TYPE: {file_info.get('mime_type')}")
-                    context_info.append(f"INSTRUCTION: Use placeholder '<base64_encoded_data>' - tool wrapper will replace with real data")
+                    context_info.append(f"INSTRUCTION: Use placeholder '<base64_encoded_data>' - tool wrapper will fetch real data from cache")
+                else:
+                    context_info.append(f"FILE_DATA_AVAILABLE: {'Yes' if file_info.get('file_data') else 'No'}")
 
                 print(f"🔍 DEBUG: File info in context: {file_info.get('filename')}")
-                print(f"🔍 DEBUG: File data length in context: {len(file_info.get('file_data', ''))}")
+                print(f"🔍 DEBUG: File ref_id in context: {file_info.get('file_ref_id')}")
 
             if context_info:
                 context_message = "\n\nContext information:\n" + "\n".join(context_info)
@@ -533,8 +549,7 @@ class EnhancedAgentNodeExecutor:
 
         # Include timestamp for test environments to avoid cache conflicts
         # This ensures each test run gets a unique cache key
-        import hashlib
-        import time
+        
         timestamp_component = ""
         if user_id.startswith('test-') or session_id.startswith('test-'):
             # For test environments, include microsecond timestamp to ensure uniqueness
@@ -741,9 +756,8 @@ class EnhancedAgentNodeExecutor:
             
             # Check if contract ID was extracted from this message
             if has_contract_id:
-                from .context_extractor import ContextExtractor
-                extractor = ContextExtractor()
-                extracted_id = extractor._extract_contract_id(last_content)
+                
+                extracted_id = context_extractor._extract_contract_id(last_content)
                 print(f"🔍 DEBUG: Contract ID extracted from current message: {extracted_id}")
                 if extracted_id == data.get('current_contract_id'):
                     print(f"🔍 DEBUG: Contract ID came from current message - this should NOT short-circuit")
@@ -784,9 +798,7 @@ class EnhancedAgentNodeExecutor:
                     last_content = ''
                 
                 # Check if contract ID was extracted from the current message
-                from .context_extractor import ContextExtractor
-                extractor = ContextExtractor()
-                extracted_id = extractor._extract_contract_id(last_content)
+                extracted_id = context_extractor._extract_contract_id(last_content)
                 
                 # Only short-circuit if:
                 # 1. The last message is just a contract ID (simple number)
@@ -825,11 +837,7 @@ class EnhancedAgentNodeExecutor:
             print(f"🔍 DEBUG: No tool mapping for {user_operation}")
             return {"messages": [{"role": "assistant", "content": f"I don't know how to handle {user_operation} operation."}]}
 
-        # Import the tool function
-        from ..tools.contract_tools import (
-            update_contract_tool, delete_contract_tool,
-            smart_create_contract_tool, upload_contract_document_tool
-        )
+        
 
         tool_functions = {
             'update_contract_tool': update_contract_tool,
@@ -846,7 +854,7 @@ class EnhancedAgentNodeExecutor:
         try:
             # Prepare tool arguments based on operation
             if user_operation == 'update_contract':
-                from ..tools.contract_tools import UpdateContractParams
+                
                 params = UpdateContractParams(
                     client_name=client_name,
                     contract_id=int(contract_id) if contract_id else None
@@ -860,14 +868,14 @@ class EnhancedAgentNodeExecutor:
                     'current_contract_id': contract_id
                 }
             elif user_operation == 'delete_contract':
-                from ..tools.contract_tools import DeleteContractParams
+                
                 params = DeleteContractParams(
                     client_name=client_name,
                     contract_id=int(contract_id) if contract_id else None
                 )
             elif user_operation == 'upload_contract_document':
                 # Handle upload operation with actual file data from context
-                from ..tools.contract_tools import UploadContractDocumentParams
+                
                 
                 # Extract file info from context
                 context_info = state.get('context', {})
@@ -879,14 +887,34 @@ class EnhancedAgentNodeExecutor:
                 
                 print(f"🔍 DEBUG: File info extracted - filename: {file_info.get('filename')}, size: {file_info.get('file_size')}")
                 
-                params = UploadContractDocumentParams(
-                    client_name=client_name,
-                    contract_id=int(contract_id) if contract_id else None,
-                    file_data=file_info.get('file_data', ''),
-                    filename=file_info.get('filename', 'unknown_file'),
-                    file_size=file_info.get('file_size', 0),
-                    mime_type=file_info.get('mime_type', 'application/octet-stream')
-                )
+                # Handle file reference (optimized approach)
+                if file_info.get('file_ref_id'):
+                    
+                    cached_file = file_cache.get_file(file_info['file_ref_id'])
+                    
+                    if cached_file:
+                        params = UploadContractDocumentParams(
+                            client_name=client_name,
+                            contract_id=int(contract_id) if contract_id else None,
+                            file_data=cached_file['file_data'],
+                            filename=cached_file['filename'],
+                            file_size=cached_file['file_size'],
+                            mime_type=cached_file['mime_type']
+                        )
+                        print(f"🔍 DEBUG: Using cached file data - filename: {cached_file['filename']}, size: {cached_file['file_size']}")
+                    else:
+                        print(f"🔍 DEBUG: File not found in cache, ref_id: {file_info['file_ref_id']}")
+                        return {"messages": [{"role": "assistant", "content": "❌ File data not found. Please try uploading the file again."}]}
+                else:
+                    # Fallback to old approach
+                    params = UploadContractDocumentParams(
+                        client_name=client_name,
+                        contract_id=int(contract_id) if contract_id else None,
+                        file_data=file_info.get('file_data', ''),
+                        filename=file_info.get('filename', 'unknown_file'),
+                        file_size=file_info.get('file_size', 0),
+                        mime_type=file_info.get('mime_type', 'application/octet-stream')
+                    )
             else:
                 # For other operations, create basic params
                 params = {"client_name": client_name, "user_response": contract_id}
@@ -896,10 +924,18 @@ class EnhancedAgentNodeExecutor:
                 print(f"🔍 DEBUG: Calling {tool_name} with params: client_name='{params.client_name}' contract_id={params.contract_id} file_data='{params.file_data[:50]}...' filename='{params.filename}' file_size={params.file_size} mime_type='{params.mime_type}'")
             else:
                 print(f"🔍 DEBUG: Calling {tool_name} with params: {params}")
+            # TODO: CONFIRMATION FIX - Build proper context with messages for all tools
+            tool_context = {
+                **state.get('context', {}),
+                'messages': state.get('messages', []),
+                'current_workflow': state.get('data', {}).get('current_workflow')
+            }
+            print(f"🔍 DEBUG CONTEXT: Tool context has {len(tool_context.get('messages', []))} messages")
+            
             if user_operation == 'update_contract':
                 result = await tool_function(params, context)
             else:
-                result = await tool_function(params, state.get('context', {}))
+                result = await tool_function(params, tool_context)
 
             # Format the result as a message
             if hasattr(result, 'message'):
@@ -921,6 +957,13 @@ class EnhancedAgentNodeExecutor:
             if result_data:
                 message["data"] = result_data
                 print(f"🔍 DIRECT TOOL: Added data to message, total message keys: {list(message.keys())}")
+                
+                # TODO: CONFIRMATION FIX - Store current_workflow from tool result data if present
+                if isinstance(result_data, dict) and 'current_workflow' in result_data:
+                    if 'data' not in state:
+                        state['data'] = {}
+                    state['data']['current_workflow'] = result_data['current_workflow']
+                    print(f"🔍 DIRECT TOOL: Stored current_workflow: {result_data['current_workflow']}")
             else:
                 print(f"🔍 DIRECT TOOL: No data to add, message keys: {list(message.keys())}")
 
@@ -944,10 +987,7 @@ class EnhancedAgentNodeExecutor:
             print(f"🔍 DEBUG: Looking up contract {contract_id} to get client name")
 
             # Import here to avoid circular imports
-            from src.database.core.database import get_ai_db
-            from src.database.core.models import Contract, Client
-            from sqlalchemy import select
-            from sqlalchemy.orm import selectinload
+            
 
             async with get_ai_db() as session:
                 # Get contract with client information
@@ -1060,7 +1100,7 @@ async def client_agent_node_async(state: AgentState) -> Dict:
         return result
     except Exception as e:
         print(f"❌ Client Agent - execution failed: {e}")
-        import traceback
+        
         print(f"❌ Client Agent - full traceback: {traceback.format_exc()}")
         raise
 

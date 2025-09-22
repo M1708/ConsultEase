@@ -11,6 +11,61 @@ import asyncio
 import re
 from datetime import datetime
 
+# Import existing tools
+from ..tools.contract_tools import (
+    smart_create_contract_tool,
+    update_contract_tool,
+    search_contracts_tool,
+    get_contract_details_tool,
+    create_client_tool,
+    search_clients_tool,
+    get_contracts_by_client_tool,
+    get_all_clients_with_contracts_tool,
+    get_contracts_for_next_month_billing_tool,
+    get_contracts_by_amount_tool,
+    CreateClientParams,
+    UpdateContractParams,
+    SmartContractParams,
+    ContractToolResult
+)
+
+# Import employee tools
+from ..tools.employee_tools import (
+    create_employee_tool,
+    update_employee_tool,
+    search_employees_tool,
+    get_employee_details_tool,
+    delete_employee_tool,
+    check_employee_exists_tool,
+    search_profiles_by_name_tool,
+    get_all_employees_tool,
+    get_employees_by_committed_hours_tool,
+    upload_employee_document_tool,
+    delete_employee_document_tool,
+    get_employee_document_tool,
+    CreateEmployeeParams,
+    UpdateEmployeeParams,
+    DeleteEmployeeParams,
+    UploadEmployeeDocumentParams,
+    DeleteEmployeeDocumentParams,
+    GetEmployeeDocumentParams
+)
+
+# Import user tools
+from ..tools.user_tools import (
+    create_user_tool,
+    get_user_details_tool,
+    update_user_tool,
+    delete_user_tool,
+    search_users_tool,
+    CreateUserParams,
+    UpdateUserParams,
+    SearchUsersParams,
+    GetUserDetailsParams,
+    DeleteUserParams,
+    UserToolResult
+)
+
 def _convert_date_format(date_str: str) -> str:
     """Convert date from 'Feb 15th 2026' or 'March 15 2026' format to '2026-02-15' format"""
     try:
@@ -40,22 +95,7 @@ def _convert_date_format(date_str: str) -> str:
         # If parsing fails, return the original string
         return date_str
 
-# Import existing tools
-from ..tools.contract_tools import (
-    smart_create_contract_tool,
-    update_contract_tool,
-    search_contracts_tool,
-    get_contract_details_tool,
-    create_client_tool,
-    search_clients_tool,
-    get_contracts_by_client_tool,
-    get_all_clients_with_contracts_tool,
-    get_contracts_for_next_month_billing_tool,
-    CreateClientParams,
-    UpdateContractParams,
-    SmartContractParams,
-    ContractToolResult
-)
+
 
 def _extract_field_from_request(user_request: str) -> Optional[Dict[str, Any]]:
     """Extract the field to update and its value from user request."""
@@ -69,7 +109,13 @@ def _extract_field_from_request(user_request: str) -> Optional[Dict[str, Any]]:
         (r"update\s+billing\s+frequency\s+to\s+(\w+)", "billing_frequency"),
         (r"set\s+billing\s+frequency\s+to\s+(\w+)", "billing_frequency"),
         
-        # Amount patterns
+        # Current amount patterns (MUST BE FIRST to avoid conflicts with general amount patterns)
+        (r"current\s+amount\s+to\s+[\$]?([\d,]+(?:\.\d{2})?)", "current_amount"),
+        (r"change\s+current\s+amount\s+to\s+[\$]?([\d,]+(?:\.\d{2})?)", "current_amount"),
+        (r"update\s+current\s+amount\s+to\s+[\$]?([\d,]+(?:\.\d{2})?)", "current_amount"),
+        (r"set\s+current\s+amount\s+to\s+[\$]?([\d,]+(?:\.\d{2})?)", "current_amount"),
+        
+        # Amount patterns (general - comes after current amount to avoid conflicts)
         (r"amount\s+to\s+\$?([\d,]+(?:\.\d{2})?)", "original_amount"),
         (r"change\s+amount\s+to\s+\$?([\d,]+(?:\.\d{2})?)", "original_amount"),
         (r"update\s+amount\s+to\s+\$?([\d,]+(?:\.\d{2})?)", "original_amount"),
@@ -81,9 +127,35 @@ def _extract_field_from_request(user_request: str) -> Optional[Dict[str, Any]]:
         (r"update\s+status\s+to\s+(\w+)", "status"),
         (r"set\s+status\s+to\s+(\w+)", "status"),
         
-        # Date patterns
+        # Date patterns - Natural language dates
+        (r"change\s+start\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "start_date"),
+        (r"update\s+start\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "start_date"),
+        (r"set\s+start\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "start_date"),
+        (r"start\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "start_date"),
+        
+        (r"change\s+end\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "end_date"),
+        (r"update\s+end\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "end_date"),
+        (r"set\s+end\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "end_date"),
+        (r"end\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "end_date"),
+        
+        (r"change\s+termination\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "termination_date"),
+        (r"update\s+termination\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "termination_date"),
+        (r"set\s+termination\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "termination_date"),
+        (r"termination\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "termination_date"),
+        
+        # Date patterns - ISO format (YYYY-MM-DD)
         (r"start\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "start_date"),
         (r"end\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "end_date"),
+        (r"termination\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "termination_date"),
+        (r"change\s+termination\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "termination_date"),
+        (r"update\s+termination\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "termination_date"),
+        (r"set\s+termination\s+date\s+to\s+(\d{4}-\d{2}-\d{2})", "termination_date"),
+        
+        # Amendment patterns
+        (r"amendments?\s+to\s+(.+)", "amendments"),
+        (r"change\s+amendments?\s+to\s+(.+)", "amendments"),
+        (r"update\s+amendments?\s+to\s+(.+)", "amendments"),
+        (r"set\s+amendments?\s+to\s+(.+)", "amendments"),
         
         # Billing prompt date patterns
         (r"next\s+billing\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "billing_prompt_next_date"),
@@ -93,67 +165,59 @@ def _extract_field_from_request(user_request: str) -> Optional[Dict[str, Any]]:
         (r"set\s+next\s+billing\s+date\s+to\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4})", "billing_prompt_next_date"),
     ]
     
-    for pattern, field_name in field_patterns:
+    
+    for i, (pattern, field_name) in enumerate(field_patterns):
+        #(f"🔍 FIELD EXTRACTION DEBUG: Testing pattern {i}: '{pattern}' for field '{field_name}'")
         match = re.search(pattern, user_request_lower)
         if match:
             value = match.group(1)
+            #print(f"🔍 FIELD EXTRACTION DEBUG: ✅ MATCHED! Raw value: '{value}', field: '{field_name}'")
             
             # Special handling for different field types
-            if field_name == "original_amount":
+            if field_name in ["original_amount", "current_amount"]:
                 # Remove commas and convert to float
+                original_value = value
                 value = float(value.replace(",", ""))
-            elif field_name in ["start_date", "end_date"]:
-                # Keep as string for date fields
-                pass
+                #print(f"🔍 FIELD EXTRACTION DEBUG: Converted '{original_value}' to {value} (float)")
+            elif field_name in ["start_date", "end_date", "termination_date"]:
+                # Check if it's a natural language date that needs conversion
+                if re.match(r'\w+\s+\d{1,2}(?:st|nd|rd|th)?\s+\d{4}', value):
+                    # Convert natural language date to ISO format
+                    original_value = value
+                    value = _convert_date_format(value)
+                    
+                else:
+                    # Keep as string for ISO format dates
+                    print(f"🔍 FIELD EXTRACTION DEBUG: Keeping ISO date as string: '{value}'")
             elif field_name == "billing_prompt_next_date":
                 # Convert date format from "Feb 15th 2026" to "2026-02-15"
+                original_value = value
                 value = _convert_date_format(value)
+                
             elif field_name == "billing_frequency":
                 # Capitalize first letter
+                original_value = value
                 value = value.capitalize()
+                
             elif field_name == "status":
                 # Keep as lowercase
+                
                 value = value.lower()
+            elif field_name == "amendments":
+                # Keep amendments as string, trim whitespace
+                
+                value = value.strip()
             
-            return {field_name: value}
+            result = {field_name: value}
+            
+            return result
+        else:
+            print(f"🔍 FIELD EXTRACTION DEBUG: ❌ No match for pattern {i}")
+    
+    print(f"🔍 FIELD EXTRACTION DEBUG: No patterns matched, returning None")
     
     return None
 
-# Import employee tools
-from ..tools.employee_tools import (
-    create_employee_tool,
-    update_employee_tool,
-    search_employees_tool,
-    get_employee_details_tool,
-    delete_employee_tool,
-    check_employee_exists_tool,
-    search_profiles_by_name_tool,
-    get_all_employees_tool,
-    upload_employee_document_tool,
-    delete_employee_document_tool,
-    get_employee_document_tool,
-    CreateEmployeeParams,
-    UpdateEmployeeParams,
-    DeleteEmployeeParams,
-    UploadEmployeeDocumentParams,
-    DeleteEmployeeDocumentParams,
-    GetEmployeeDocumentParams
-)
-
-# Import user tools
-from ..tools.user_tools import (
-    create_user_tool,
-    get_user_details_tool,
-    update_user_tool,
-    delete_user_tool,
-    search_users_tool,
-    CreateUserParams,
-    UpdateUserParams,
-    SearchUsersParams,
-    GetUserDetailsParams,
-    DeleteUserParams,
-    UserToolResult
-)
 
 
 class ContractSearchParams(BaseModel):
@@ -219,6 +283,7 @@ class ToolRegistry:
             "get_client_contracts": self._create_get_client_contracts_tool(),
             "get_all_clients_with_contracts": self._create_get_all_clients_with_contracts_tool(),
             "get_contracts_for_next_month_billing": self._create_get_contracts_for_next_month_billing_tool(),
+            "get_contracts_by_amount": self._create_get_contracts_by_amount_tool(),
 
             # Employee Tools
             "create_employee": self._create_employee_tool(),
@@ -229,6 +294,7 @@ class ToolRegistry:
             "check_employee_exists": self._create_check_employee_exists_tool(),
             "search_profiles": self._create_search_profiles_tool(),
             "get_all_employees": self._create_get_all_employees_tool(),
+            "get_employees_by_committed_hours": self._create_get_employees_by_committed_hours_tool(),
             "upload_employee_document": self._create_upload_employee_document_tool(),
             "delete_employee_document": self._create_delete_employee_document_tool(),
             "get_employee_document": self._create_get_employee_document_tool(),
@@ -307,14 +373,12 @@ class ToolRegistry:
 
                 # Extract field from original user request if available
                 if context and context.get('original_user_request'):
-                    print(f"🔍 FIELD EXTRACTION: Original user request: {context['original_user_request']}")
+                    
                     extracted_field = _extract_field_from_request(context['original_user_request'])
                     if extracted_field:
-                        print(f"🔍 FIELD EXTRACTION: Extracted field: {extracted_field}")
+                        
                         update_params.update(extracted_field)
-                        print(f"🔍 FIELD EXTRACTION: Updated params with extracted field: {update_params}")
-                    else:
-                        print(f"🔍 FIELD EXTRACTION: No field extracted from request")
+                    
                 else:
                     print(f"🔍 FIELD EXTRACTION: No original_user_request in context")
 
@@ -662,13 +726,13 @@ Notes: {contract['notes'] or 'None'}"""
 
                         return ContractToolResult(
                             success=True,
-                            message=f"Found {len(employees)} employees:\n" + "\n".join(employee_summaries),
+                            message=f"Found {len(employees)} employees:",
                             data={"employees": employees, "count": len(employees)}
                         )
                     else:
                         return ContractToolResult(
                             success=True,
-                            message="No employees found matching the search criteria.",
+                            message="No matching employees found for your criteria.",
                             data={"employees": [], "count": 0}
                         )
                 else:
@@ -949,6 +1013,75 @@ Rate: {employee['rate']} ({employee['rate_type']})"""
             "name": "get_all_employees",
             "description": "Get a list of all employees with basic information",
             "parameters": {}
+        }
+
+    def _create_get_employees_by_committed_hours_tool(self):
+        """Create SDK-compatible get employees by committed hours tool"""
+        async def get_employees_by_committed_hours(min_hours: int, context: Optional[Dict[str, Any]] = None) -> ContractToolResult:
+            """Get employees with committed hours greater than or equal to min_hours"""
+            try:
+                # Call existing tool
+                result = await get_employees_by_committed_hours_tool(min_hours)
+
+                if result.success:
+                    employees = result.data.get("employees", [])
+                    if employees:
+                        employee_summaries = []
+                        for emp in employees:
+                            employee_summaries.append({
+                                "employee_id": emp.get("employee_id"),
+                                "employee_name": emp.get("employee_name"),
+                                "job_title": emp.get("job_title"),
+                                "department": emp.get("department"),
+                                "committed_hours": emp.get("committed_hours"),
+                                "employment_type": emp.get("employment_type"),
+                                "full_time_part_time": emp.get("full_time_part_time")
+                            })
+                        
+                        return ContractToolResult(
+                            success=True,
+                            message=f"📋 Found {len(employee_summaries)} employees with committed hours >= {min_hours}",
+                            data={
+                                "employees": employee_summaries,
+                                "count": len(employee_summaries),
+                                "min_hours": min_hours
+                            }
+                        )
+                    else:
+                        return ContractToolResult(
+                            success=True,
+                            message=f"📋 Found 0 employees with committed hours >= {min_hours}",
+                            data={
+                                "employees": [],
+                                "count": 0,
+                                "min_hours": min_hours
+                            }
+                        )
+                else:
+                    return ContractToolResult(
+                        success=False,
+                        message=result.message
+                    )
+            except Exception as e:
+                return ContractToolResult(
+                    success=False,
+                    message=f"Error getting employees by committed hours: {str(e)}"
+                )
+
+        return {
+            "function": get_employees_by_committed_hours,
+            "name": "get_employees_by_committed_hours",
+            "description": "Get employees with committed hours greater than or equal to the specified minimum hours",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_hours": {
+                        "type": "integer",
+                        "description": "Minimum committed hours per week to filter by"
+                    }
+                },
+                "required": ["min_hours"]
+            }
         }
 
     def _create_upload_employee_document_tool(self):
@@ -1274,13 +1407,9 @@ Rate: {employee['rate']} ({employee['rate_type']})"""
         async def get_all_clients_with_contracts(context: Optional[Dict[str, Any]] = None) -> ContractToolResult:
             """Get all clients with their contracts information"""
             try:
-                print(f"🔍 CLIENT QUERY DEBUG: SDK get_all_clients_with_contracts called")
-                
                 # Call existing tool
                 result = await get_all_clients_with_contracts_tool()
-                
-                print(f"🔍 CLIENT QUERY DEBUG: Tool result success={result.success}, message length={len(result.message) if result.message else 0}")
-                
+                    
                 return result
             except Exception as e:
                 return ContractToolResult(
@@ -1327,4 +1456,41 @@ Rate: {employee['rate']} ({employee['rate_type']})"""
             "name": "get_contracts_for_next_month_billing", 
             "description": "Get contracts with upcoming billing dates in the next month. If client_name is provided, filters to that client only. If not provided, shows all clients.",
             "parameters": BillingContractsParams
+        }
+
+    def _create_get_contracts_by_amount_tool(self):
+        """Create SDK-compatible get contracts by amount tool"""
+        
+        class ContractsByAmountParams(BaseModel):
+            min_amount: Optional[float] = Field(None, description="Minimum contract amount to filter by")
+            max_amount: Optional[float] = Field(None, description="Maximum contract amount to filter by")
+            client_name: Optional[str] = Field(None, description="Client name to filter contracts (optional)")
+
+        async def get_contracts_by_amount(params: Optional[ContractsByAmountParams] = None, context: Optional[Dict[str, Any]] = None) -> ContractToolResult:
+            """Get contracts filtered by amount range"""
+            try:
+                min_amount = None
+                max_amount = None
+                client_name = None
+                
+                if params:
+                    min_amount = params.min_amount
+                    max_amount = params.max_amount
+                    client_name = params.client_name
+                
+                # Call existing tool
+                result = await get_contracts_by_amount_tool(min_amount=min_amount, max_amount=max_amount, client_name=client_name, context=context)
+                
+                return result
+            except Exception as e:
+                return ContractToolResult(
+                    success=False,
+                    message=f"Error getting contracts by amount: {str(e)}"
+                )
+
+        return {
+            "function": get_contracts_by_amount,
+            "name": "get_contracts_by_amount",
+            "description": "Get contracts filtered by amount range. Use min_amount for 'more than' queries, max_amount for 'less than' queries, or both for range queries.",
+            "parameters": ContractsByAmountParams
         }

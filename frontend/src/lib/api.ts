@@ -182,7 +182,11 @@ class ApiClient {
         "show me all clients with their contracts", "show all clients with contracts",
         // Billing-related queries that should go through contract_agent
         "billing", "billing date", "billing prompt", "upcoming billing",
-        "next billing", "billing frequency", "contracts with billing"
+        "next billing", "billing frequency", "contracts with billing",
+        // Amount filtering queries that should go through contract_agent
+        "amount more than", "original amount more than", "amount greater than",
+        "original amount greater than", "more than $", "greater than $",
+        "contracts for all clients with", "contracts with amount"
       ];
 
       const isComplexQuery = complexQueries.some((query) =>

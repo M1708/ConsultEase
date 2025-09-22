@@ -170,11 +170,46 @@ class EnhancedRoutingLogic:
         print(f"🔍 ENHANCED ROUTING: classify_request called with user_message='{user_message}', context={context}")
         message_lower = user_message.lower()
 
+        # TODO: CONFIRMATION FIX - Step 0: Check for confirmation responses first
+        if self._is_confirmation_response(user_message, context):
+            current_agent = context.get('current_agent')
+            if current_agent:
+                print(f"🔍 ENHANCED ROUTING: Confirmation response detected, routing to {current_agent}")
+                return {
+                    "agent_name": current_agent,
+                    "confidence": "high",
+                    "reasoning": f"Confirmation response detected - routing to {current_agent}",
+                    "operation_type": "confirmation",
+                    "scores": {current_agent: 10.0, "client_agent": 0.0, "contract_agent": 0.0, "employee_agent": 0.0}
+                }
+
         # Step 1: Identify operation type
         operation_type = self._identify_operation_type(message_lower)
         print(f"🔍 ENHANCED ROUTING: operation_type='{operation_type}'")
 
-        # Step 2: Check for contract ID responses (special case)
+        # Step 2: Check for contract operations (high priority)
+        if any(keyword in user_message.lower() for keyword in ['create a new contract', 'create contract', 'new contract', 'contract for', 'billing', 'invoice']):
+            print(f"🔍 ENHANCED ROUTING: Contract operation detected, routing to contract_agent")
+            return {
+                "agent_name": "contract_agent",
+                "confidence": "high",
+                "reasoning": "Contract operation detected - routing to contract agent",
+                "operation_type": "create_contract",
+                "scores": {"contract_agent": 10.0, "client_agent": 0.0, "employee_agent": 0.0}
+            }
+        
+        # Step 3: Check for employee document uploads (special case)
+        if self._is_employee_document_upload(user_message, context):
+            print(f"🔍 ENHANCED ROUTING: Employee document upload detected, routing to employee_agent")
+            return {
+                "agent_name": "employee_agent",
+                "confidence": "high",
+                "reasoning": "Employee document upload detected - routing to employee agent",
+                "operation_type": "upload_employee_document",
+                "scores": {"employee_agent": 10.0, "client_agent": 0.0, "contract_agent": 0.0}
+            }
+        
+        # Step 4: Check for contract ID responses (special case)
         if self._is_contract_id_response(user_message, context):
             print(f"🔍 ENHANCED ROUTING: Contract ID response detected, routing to contract_agent")
             return {
@@ -182,6 +217,17 @@ class EnhancedRoutingLogic:
                 "confidence": "high",
                 "reasoning": "Detected contract ID response - routing to contract agent",
                 "operation_type": "contract_response",
+                "scores": {"contract_agent": 10.0, "client_agent": 0.0, "employee_agent": 0.0}
+            }
+        
+        # Step 4.5: Check for "all" responses to contract operations (special case)
+        if self._is_all_response_to_contract_operation(user_message, context):
+            print(f"🔍 ENHANCED ROUTING: 'All' response to contract operation detected, routing to contract_agent")
+            return {
+                "agent_name": "contract_agent",
+                "confidence": "high",
+                "reasoning": "Detected 'all' response to contract operation - routing to contract agent",
+                "operation_type": "contract_all_response",
                 "scores": {"contract_agent": 10.0, "client_agent": 0.0, "employee_agent": 0.0}
             }
         
@@ -260,6 +306,15 @@ class EnhancedRoutingLogic:
             if adjusted_scores["employee_agent"] > adjusted_scores["client_agent"]:
                 adjusted_scores["client_agent"] *= 0.5
         
+        # Adjustment 1.5: Employee document operations - highest priority
+        if (("delete" in message_lower or "upload" in message_lower) and 
+            "document" in message_lower and 
+            any(word in message_lower for word in ["employee", "staff", "worker", "personnel"])):
+            # Employee document operations get highest priority
+            adjusted_scores["employee_agent"] += 15.0
+            adjusted_scores["contract_agent"] = 0.0
+            adjusted_scores["client_agent"] = 0.0
+        
         # Adjustment 2: Contract vs Client disambiguation
         if operation_type == "update" and any(word in message_lower for word in ["billing", "contract", "amount", "date"]):
             adjusted_scores["contract_agent"] += 3.0
@@ -275,10 +330,19 @@ class EnhancedRoutingLogic:
                 adjusted_scores["contract_agent"] += 10.0
                 adjusted_scores["client_agent"] = 0.0
         
-        # Adjustment 3.5: Contracts with documents - route to contract agent
+        # Adjustment 3.5: Contracts with documents - route to contract agent (unless it's employee document)
         if "contract" in message_lower and "document" in message_lower:
-            # Contracts with documents operations should go to contract agent
-            adjusted_scores["contract_agent"] += 10.0
+            # Check if this is an employee document operation first
+            if not any(word in message_lower for word in ["employee", "staff", "worker", "personnel"]):
+                # Only route to contract agent if it's NOT an employee document operation
+                adjusted_scores["contract_agent"] += 10.0
+                adjusted_scores["client_agent"] = 0.0
+        
+        # Adjustment 3.6: Contract queries with "all clients" - route to contract agent
+        if ("contract" in message_lower and "all clients" in message_lower) or \
+           ("contracts" in message_lower and "all clients" in message_lower):
+            # Contract queries about all clients should go to contract agent
+            adjusted_scores["contract_agent"] += 15.0
             adjusted_scores["client_agent"] = 0.0
         
         # Adjustment 4: Person name context (Agentic approach - let agent reason about context)
@@ -311,14 +375,24 @@ class EnhancedRoutingLogic:
     
     def _has_employee_context(self, message_lower: str) -> bool:
         """Check if the message has strong employee-related context."""
-        employee_indicators = [
+        # Basic employee patterns
+        basic_patterns = [
+            "employee", "staff", "personnel", "worker",
+            "details for employee", "show details for", "employee details",
+            "staff details", "personnel details"
+        ]
+        
+        # Specific employee indicators
+        specific_indicators = [
             "employee_number", "emp_number", "staff_id", "personnel_id",
             "job_title", "department", "salary", "wage", "hourly_rate",
             "full_time", "part_time", "employment_type", "hire_date",
             "contractor", "consultant", "permanent", "temporary"
         ]
         
-        return any(indicator in message_lower for indicator in employee_indicators)
+        # Check both basic patterns and specific indicators
+        return (any(pattern in message_lower for pattern in basic_patterns) or 
+                any(indicator in message_lower for indicator in specific_indicators))
     
     def _extract_person_names(self, message: str) -> List[str]:
         """Extract person names from the message."""
@@ -386,6 +460,36 @@ class EnhancedRoutingLogic:
         
         return has_company and has_contact_info
 
+    def _is_confirmation_response(self, user_message: str, context: Dict[str, Any] = None) -> bool:
+        """Check if the user message is a confirmation response (yes/no)."""
+        print(f"🔍 CONFIRMATION CHECK: user_message='{user_message}', context={context}")
+        
+        # Check for confirmation words
+        confirmation_words = ['yes', 'no', 'y', 'n', 'ok', 'okay', 'confirm', 'cancel', 'proceed', 'go ahead', 'sure', 'alright']
+        message_lower = user_message.lower().strip()
+        
+        print(f"🔍 CONFIRMATION CHECK: message_lower='{message_lower}', in confirmation_words={message_lower in confirmation_words}")
+        
+        if message_lower in confirmation_words:
+            print(f"🔍 CONFIRMATION CHECK: Confirmation word detected: '{message_lower}'")
+            # Check if we have an active workflow that needs confirmation
+            current_workflow = context.get('current_workflow') if context else None
+            user_operation = context.get('user_operation') if context else None
+            
+            print(f"🔍 CONFIRMATION CHECK: current_workflow='{current_workflow}', user_operation='{user_operation}'")
+            
+            # If we have an active workflow, this is likely a confirmation
+            if current_workflow or user_operation:
+                print(f"🔍 CONFIRMATION CHECK: Active workflow/operation found, returning True")
+                return True
+            else:
+                print(f"🔍 CONFIRMATION CHECK: No active workflow/operation found")
+        else:
+            print(f"🔍 CONFIRMATION CHECK: Message '{message_lower}' not in confirmation words: {confirmation_words}")
+        
+        print(f"🔍 CONFIRMATION CHECK: Not a confirmation response, returning False")
+        return False
+
     def _is_contract_id_response(self, user_message: str, context: Dict[str, Any] = None) -> bool:
         """Check if the user message is a contract ID response that should be routed to contract agent."""
         print(f"🔍 CONTRACT ID CHECK: user_message='{user_message}', context={context}")
@@ -409,7 +513,7 @@ class EnhancedRoutingLogic:
                 # Check for pending contract operations
                 user_operation = context.get('user_operation', '')
                 print(f"🔍 CONTRACT ID CHECK: user_operation='{user_operation}'")
-                if any(op in user_operation.lower() for op in ['contract', 'upload', 'document']):
+                if any(op in user_operation.lower() for op in ['contract', 'upload_contract_document']):
                     print(f"🔍 CONTRACT ID CHECK: Contract operation found, returning True")
                     return True
 
@@ -435,9 +539,119 @@ class EnhancedRoutingLogic:
         if context and 'data' in context:
             state_data = context['data']
             user_operation = state_data.get('user_operation', '')
-            if any(op in user_operation.lower() for op in ['contract', 'upload', 'document']):
+            if any(op in user_operation.lower() for op in ['contract', 'upload_contract_document']):
                 return True
 
+        return False
+
+    def _is_all_response_to_contract_operation(self, user_message: str, context: Dict[str, Any] = None) -> bool:
+        """Check if the user message is an 'all' response to a contract operation."""
+        print(f"🔍 ALL RESPONSE CHECK: user_message='{user_message}', context={context}")
+        
+        # Check if message is "all" (case insensitive)
+        if user_message.lower().strip() != 'all':
+            print(f"🔍 ALL RESPONSE CHECK: Not 'all', returning False")
+            return False
+
+        # If we have context indicating a pending contract operation, route to contract agent
+        if context:
+            context_str = str(context)
+            print(f"🔍 ALL RESPONSE CHECK: Context available, checking for contract operations")
+            
+            # Check for pending contract operations
+            if isinstance(context, dict):
+                user_operation = context.get('user_operation', '')
+                print(f"🔍 ALL RESPONSE CHECK: user_operation='{user_operation}'")
+                if any(op in user_operation.lower() for op in ['update_contract', 'delete_contract', 'create_contract']):
+                    print(f"🔍 ALL RESPONSE CHECK: Contract operation found, returning True")
+                    return True
+
+                # Check for contract-related context
+                if context.get('current_contract_id') or 'contract' in context_str.lower():
+                    print(f"🔍 ALL RESPONSE CHECK: Contract context found, returning True")
+                    return True
+            else:
+                # Handle string context
+                if 'contract' in context_str.lower():
+                    print(f"🔍 ALL RESPONSE CHECK: Contract in string context, returning True")
+                    return True
+            
+            # Check for operation state in string context
+            if 'update_contract' in context_str or 'delete_contract' in context_str or 'create_contract' in context_str:
+                print(f"🔍 ALL RESPONSE CHECK: Contract operation in string context, returning True")
+                return True
+
+        # Also check state data for contract operations
+        if context and 'data' in context:
+            state_data = context['data']
+            user_operation = state_data.get('user_operation', '')
+            if any(op in user_operation.lower() for op in ['update_contract', 'delete_contract', 'create_contract']):
+                print(f"🔍 ALL RESPONSE CHECK: Contract operation in state data, returning True")
+                return True
+
+        print(f"🔍 ALL RESPONSE CHECK: No contract operation found, returning False")
+        return False
+
+    def _is_employee_document_upload(self, user_message: str, context: Dict[str, Any] = None) -> bool:
+        """Check if this is an employee document upload operation."""
+        message_lower = user_message.lower()
+        print(f"🔍 EMPLOYEE DOCUMENT CHECK: Checking message='{user_message}', context={context}")
+        
+        # Check for file upload context
+        if context and isinstance(context, dict):
+            if context.get('file_info'):
+                print(f"🔍 EMPLOYEE DOCUMENT CHECK: File info found, checking for employee context")
+                
+                # Check if this is an employee operation - prioritize current message over context
+                user_operation = context.get('user_operation', '')
+                print(f"🔍 EMPLOYEE DOCUMENT CHECK: user_operation='{user_operation}'")
+                
+                # First check if the current message indicates an employee operation
+                if ('employee' in message_lower or 'staff' in message_lower or 'worker' in message_lower or 'personnel' in message_lower):
+                    print(f"🔍 EMPLOYEE DOCUMENT CHECK: Current message indicates employee operation")
+                    return True
+                
+                # Only check context if current message doesn't clearly indicate a different operation
+                if not ('client' in message_lower or 'contract' in message_lower or 'delete' in message_lower):
+                    if 'employee' in user_operation.lower() or 'upload_employee_document' in user_operation.lower():
+                        print(f"🔍 EMPLOYEE DOCUMENT CHECK: Employee operation detected from context")
+                        return True
+                
+                # Generic logic: Check for explicit employee context indicators
+                # Priority 1: Explicit employee keywords
+                if 'employee' in message_lower or 'staff' in message_lower or 'worker' in message_lower or 'personnel' in message_lower:
+                    print(f"🔍 EMPLOYEE DOCUMENT CHECK: Explicit employee keyword detected")
+                    return True
+                
+                # Priority 2: Check if this is clearly a client operation (explicit client mention)
+                if 'client' in message_lower:
+                    print(f"🔍 EMPLOYEE DOCUMENT CHECK: Client mentioned - NOT an employee operation")
+                    return False
+                
+                # Priority 3: Check for employee document patterns (NDA without client context)
+                if 'nda' in message_lower and 'document' in message_lower and 'client' not in message_lower:
+                    print(f"🔍 EMPLOYEE DOCUMENT CHECK: NDA document without client context - likely employee")
+                    return True
+                
+                # Priority 4: Check for person-like names (first name + last name pattern)
+                # This is more generic than hardcoded names
+                
+                # Look for patterns like "for John Smith" or "for Sarah Johnson" (not company names)
+                person_pattern = r'for\s+([A-Z][a-z]+\s+[A-Z][a-z]+)'
+                person_matches = re.findall(person_pattern, user_message)
+                if person_matches:
+                    # Check if it's not a company name (companies often have LLC, Inc, Corp, etc.)
+                    company_indicators = ['llc', 'inc', 'corp', 'ltd', 'co', 'company', 'solutions', 'systems', 'group', 'international']
+                    for match in person_matches:
+                        if not any(indicator in match.lower() for indicator in company_indicators):
+                            print(f"🔍 EMPLOYEE DOCUMENT CHECK: Person name pattern detected: {match}")
+                            return True
+            else:
+                print(f"🔍 EMPLOYEE DOCUMENT CHECK: No file_info found in context")
+        else:
+            print(f"🔍 EMPLOYEE DOCUMENT CHECK: No context or context is not dict")
+        
+        print(f"🔍 EMPLOYEE DOCUMENT CHECK: Returning False")
         return False
 
     def _select_best_agent(self, scores: Dict[str, float]) -> Tuple[str, str]:

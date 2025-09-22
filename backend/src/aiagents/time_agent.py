@@ -19,8 +19,8 @@ import os
 class TimeTrackerAgent:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.name = "Milo"
-        self.instructions = "You are Milo, an AI assistant."
+        self.name = "Core"
+        self.instructions = "You are Core, an AI assistant."
         self.model = "gpt-4o-mini"
         
         # Dynamic tool mapping - no hardcoded if-else logic
@@ -208,7 +208,7 @@ class TimeTrackerAgent:
         ]
     
     async def process_message(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Process user message through Milo using OpenAI function calling"""
+        """Process user message through Core using OpenAI function calling"""
         try:
             enhanced_context = {
                 **context,
@@ -277,7 +277,7 @@ class TimeTrackerAgent:
                 validated_response = output_validation_guardrail(response_content)
                 
                 return {
-                    "agent": "Milo",
+                    "agent": "Core",
                     "response": validated_response if isinstance(validated_response, str) else str(validated_response),
                     "success": True,
                     "data": tool_results[0] if tool_results and isinstance(tool_results[0], dict) and tool_results[0].get("data") else None
@@ -291,7 +291,7 @@ class TimeTrackerAgent:
                 validated_response = output_validation_guardrail(response_content)
                 
                 return {
-                    "agent": "Milo",
+                    "agent": "Core",
                     "response": validated_response if isinstance(validated_response, str) else str(validated_response),
                     "success": True,
                     "data": None
@@ -299,7 +299,7 @@ class TimeTrackerAgent:
             
         except Exception as e:
             return {
-                "agent": "Milo",
+                "agent": "Core",
                 "response": f"❌ Error processing request: {str(e)}",
                 "success": False
             }
@@ -346,7 +346,7 @@ class TimeTrackerAgent:
     def get_capabilities(self) -> Dict[str, Any]:
         """Return agent capabilities"""
         return {
-            "name": "Milo",
+            "name": "Core",
             "description": "Time and productivity management specialist",
             "capabilities": [
                 "Log time entries for projects",

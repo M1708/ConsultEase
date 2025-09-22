@@ -24,7 +24,7 @@ class SupervisorAgent:
     
     def _get_system_instructions(self) -> str:
         """Get system instructions for the supervisor agent"""
-        return f"""You are Milo, the Supervisor Agent for a consulting management system.
+        return f"""You are Core, the Supervisor Agent for a consulting management system.
         Current date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
         CORE RESPONSIBILITIES:

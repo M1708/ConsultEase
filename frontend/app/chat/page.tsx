@@ -194,7 +194,8 @@ export default function ChatPage() {
       inputMessage,
       isTyping,
     });
-    if ((!selectedFile && !inputMessage) || isTyping) return;
+    // Require a non-empty text message regardless of file selection
+    if (!inputMessage?.trim() || isTyping) return;
 
     // TODO: INPUT CLEARING FIX - Clear input immediately when user hits enter
     const messageToSend = inputMessage.trim();
@@ -625,7 +626,7 @@ export default function ChatPage() {
                           className="text-base text-gray-600"
                           style={{ fontFamily: "Arial, sans-serif" }}
                         >
-                          <strong>Milo</strong> is thinking
+                          <strong>Core</strong> is thinking
                         </span>
                         <div className="flex space-x-1">
                           <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"></div>
@@ -717,15 +718,13 @@ export default function ChatPage() {
                     />
                     <button
                       type="submit"
-                      disabled={
-                        isTyping || (!inputMessage?.trim() && !selectedFile)
-                      }
+                      disabled={isTyping || !inputMessage?.trim()}
                       className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors flex items-center space-x-2"
                       style={{ fontFamily: "Arial, sans-serif" }}
                     >
                       {isTyping ? (
                         <div className="flex items-center space-x-1">
-                          <span>Milo is thinking</span>
+                          <span>Core is thinking</span>
                           <div className="flex space-x-1">
                             <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
                             <div

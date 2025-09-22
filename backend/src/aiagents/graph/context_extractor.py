@@ -58,6 +58,7 @@ class ContextExtractor:
     
     async def extract_context_from_user_message(self, user_message: str, existing_state: Dict[str, Any] = None) -> Dict[str, Any]:
         """Extract context from user message."""
+       
         context = {}
 
         # Extract client name first to check for client switching
@@ -95,7 +96,7 @@ class ContextExtractor:
 
         # Extract contract ID only if no client switching occurred
         contract_id = None
-        if client_name == "PRESERVE_EXISTING" or (client_name is not None and (not existing_state or (existing_state.get('current_client') or '').lower() == client_name.lower())):
+        if client_name == "PRESERVE_EXISTING" or (client_name is not None and client_name != "PRESERVE_EXISTING" and (not existing_state or (existing_state.get('current_client') or '').lower() == (client_name or '').lower())):
             contract_id = self._extract_contract_id(user_message)
             if contract_id:
                 context['current_contract_id'] = contract_id
@@ -116,6 +117,7 @@ class ContextExtractor:
             context['original_user_request'] = user_message
             print(f"🔍 DEBUG: Detected new user operation: {context['user_operation']}")
             
+            
             # CRITICAL: If this is a completely different operation type, clear workflow context
             if existing_state and 'user_operation' in existing_state:
                 previous_operation = existing_state.get('user_operation', '')
@@ -125,9 +127,19 @@ class ContextExtractor:
                     context['current_contract_id'] = None  # Clear contract ID when switching operations
         else:
             # If it's just a contract ID or a response like "all", check if we have a pending operation from previous context
-            if (contract_id and not is_new_operation) or (not is_new_operation and not contract_id):
+            # FIXED: Also check for "all" responses that should preserve operation context
+            is_response_like_all = any(phrase in user_message.lower() for phrase in ['all', 'both', 'for all', 'for both', 'every', 'each'])
+            if (contract_id and not is_new_operation) or (not is_new_operation and not contract_id) or is_response_like_all:
                 print(f"🔍 DEBUG: Response provided without operation - will preserve existing operation context")
                 # Don't extract user_operation, let the existing one be preserved
+                # CRITICAL: Also preserve the original_user_request from existing state
+                if existing_state and 'original_user_request' in existing_state:
+                    context['original_user_request'] = existing_state['original_user_request']
+                    print(f"🔍 DEBUG: Preserved original_user_request: {context['original_user_request']}")
+                # Also preserve user_operation from existing state
+                if existing_state and 'user_operation' in existing_state:
+                    context['user_operation'] = existing_state['user_operation']
+                    print(f"🔍 DEBUG: Preserved user_operation: {context['user_operation']}")
             else:
                 print(f"🔍 DEBUG: Not a new operation request (skipping user_operation extraction)")
 
@@ -166,11 +178,22 @@ class ContextExtractor:
         """Extract client name from text using fuzzy database matching."""
         print(f"🔍 DEBUG: _extract_client_name called with text: '{text}'")
         
-        # Check for "all clients" case first
+        # TODO: CONFIRMATION FIX - Check for confirmation responses first
         text_lower = text.lower()
+        confirmation_words = ['yes', 'no', 'y', 'n', 'ok', 'okay', 'confirm', 'cancel', 'proceed', 'go ahead', 'sure', 'alright']
+        if text_lower in confirmation_words:
+            print(f"🔍 DEBUG: Confirmation word detected: '{text_lower}' - preserving existing client context")
+            return "PRESERVE_EXISTING"  # Special value to indicate we should preserve existing client
+        
+        # Check for "all clients" case first (but not just "all" by itself)
         if any(phrase in text_lower for phrase in ['all clients', 'every client', 'each client']):
-            print(f"🔍 DEBUG: Detected 'all clients' case")
+            print(f"🔍 DEBUG: _extract_client_name - detected 'all clients' case for text: {text}")
             return None  # None means all clients
+        
+        # Check if it's just "all" by itself - this should preserve existing client context
+        if text_lower.strip() == 'all':
+            print(f"🔍 DEBUG: Detected standalone 'all' - preserving existing client context")
+            return "PRESERVE_EXISTING"  # Special value to indicate we should preserve existing client
         
         # If it's just a number (contract ID), don't extract client - preserve existing context
         if text.strip().isdigit():
@@ -233,9 +256,11 @@ class ContextExtractor:
         if text_lower.isdigit():
             return False
         
+        
         # If it contains operation keywords, it's a new request
-        operation_keywords = ['update', 'delete', 'create', 'upload', 'show', 'get', 'list', 'change', 'modify', 'set']
+        operation_keywords = ['update', 'delete', 'create', 'upload', 'show', 'get', 'list', 'change', 'modify', 'set', 'add', 'new']
         return any(keyword in text_lower for keyword in operation_keywords)
+    
     
     def _extract_operation_type(self, text: str) -> str:
         """Extract the specific tool operation from the user message."""
@@ -243,7 +268,13 @@ class ContextExtractor:
         print(f"🔍 DEBUG: _extract_operation_type - text: '{text}'")
         print(f"🔍 DEBUG: _extract_operation_type - text_lower: '{text_lower}'")
         
-        # Billing-specific operations (check these first for priority)
+        # Check for UPDATE operations FIRST (highest priority)
+        # This handles ALL contract updates, including billing frequency, billing dates, amounts, etc.
+        if ('update' in text_lower or 'change' in text_lower or 'modify' in text_lower or 'set' in text_lower) and 'contract' in text_lower and not ('employee' in text_lower or 'for employee' in text_lower):
+            print(f"🔍 DEBUG: _extract_operation_type - detected update_contract (generic contract update)")
+            return 'update_contract'
+        
+        # Billing-specific QUERY operations (check these after updates)
         # Only detect billing operations if it's clearly a query, not a create operation
         has_billing = 'billing' in text_lower or 'upcoming' in text_lower
         has_contract = 'contract' in text_lower
@@ -253,36 +284,45 @@ class ContextExtractor:
         
         if has_billing and has_contract and not has_create:
             print(f"🔍 DEBUG: _extract_operation_type - detected billing operation")
+            # Check for specific billing query patterns
             if ('not set' in text_lower or 'null' in text_lower or 'no billing' in text_lower or 
                 'no next billing' in text_lower or 'billing prompt date not set' in text_lower):
                 return 'get_contracts_with_null_billing'
             else:
                 return 'get_contracts_for_next_month_billing'
         elif 'amount' in text_lower and ('more than' in text_lower or 'greater than' in text_lower) and 'contract' in text_lower:
+            print(f"🔍 DEBUG: _extract_operation_type - detected get_contracts_by_amount for text: {text}")
             return 'get_contracts_by_amount'
         elif ('document' in text_lower or 'file' in text_lower) and 'contract' in text_lower and ('uploaded' in text_lower or 'have' in text_lower):
             return 'get_contracts_with_documents'
         elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'contract' in text_lower and 'document' in text_lower:
             return 'get_contracts_with_documents'
         
-        # Client operations (check these first to avoid conflicts with contract operations)
-        elif 'update' in text_lower and 'client' in text_lower:
-            return 'update_client'
-        elif 'create' in text_lower and 'client' in text_lower:
-            return 'create_client'
-        elif 'delete' in text_lower and 'client' in text_lower:
-            return 'delete_client'
-        elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'client' in text_lower:
-            return 'get_client_details'
-        
-        # Contract operations
-        elif ('update' in text_lower or 'change' in text_lower or 'modify' in text_lower) and 'contract' in text_lower:
-            print(f"🔍 DEBUG: _extract_operation_type - detected update_contract")
-            return 'update_contract'
+        # Employee creation operations (check these FIRST to avoid conflicts with document upload)
+        elif ('create' in text_lower or 'add' in text_lower) and ('employee' in text_lower or 'staff' in text_lower or 'worker' in text_lower or 'personnel' in text_lower):
+            print(f"🔍 DEBUG: _extract_operation_type - detected create_employee")
+            return 'create_employee'
+        # Employee document upload operations (check these AFTER employee creation to avoid conflicts)
+        elif 'upload' in text_lower and ('employee' in text_lower or 'staff' in text_lower or 'worker' in text_lower or 'personnel' in text_lower):
+            print(f"🔍 DEBUG: _extract_operation_type - detected upload_employee_document")
+            return 'upload_employee_document'
+        elif 'upload' in text_lower and 'contract' in text_lower and ('employee' in text_lower or 'for employee' in text_lower):
+            # Contract document for employee - this is employee document upload
+            print(f"🔍 DEBUG: _extract_operation_type - detected upload_employee_document (contract document for employee)")
+            return 'upload_employee_document'
+        # Contract operations (check these FIRST to avoid conflicts with employee operations)
+        elif ('create' in text_lower or 'add' in text_lower) and 'contract' in text_lower:
+            print(f"🔍 DEBUG: _extract_operation_type - detected create_contract")
+            return 'create_contract'
+        # Employee document deletion operations (check these FIRST to avoid conflicts with contract operations)
+        elif 'delete' in text_lower and ('nda' in text_lower or 'contract' in text_lower) and ('employee' in text_lower or 'staff' in text_lower or 'worker' in text_lower or 'personnel' in text_lower) and ('for employee' in text_lower or 'for staff' in text_lower or 'for worker' in text_lower or 'for personnel' in text_lower):
+            # Delete employee document (NDA or contract)
+            print(f"🔍 DEBUG: _extract_operation_type - detected delete_employee_document")
+            return 'delete_employee_document'
         elif 'delete' in text_lower and 'contract' in text_lower:
             print(f"🔍 DEBUG: _extract_operation_type - detected delete_contract")
             return 'delete_contract'
-        elif 'create' in text_lower and 'contract' in text_lower:
+        elif ('create' in text_lower or 'add' in text_lower) and 'contract' in text_lower:
             print(f"🔍 DEBUG: _extract_operation_type - detected create_contract")
             return 'create_contract'
         elif 'upload' in text_lower and 'contract' in text_lower:
@@ -290,8 +330,34 @@ class ContextExtractor:
         elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'contract' in text_lower:
             return 'get_contracts_by_client'
         
+        # Employee operations (check these after contract operations, before client operations)
+        elif ('update' in text_lower or 'change' in text_lower or 'modify' in text_lower or 'set' in text_lower) and ('employee' in text_lower or 'staff' in text_lower or 'worker' in text_lower or 'personnel' in text_lower):
+            print(f"🔍 DEBUG: _extract_operation_type - detected update_employee")
+            return 'update_employee'
+        elif 'delete' in text_lower and ('employee' in text_lower or 'staff' in text_lower or 'worker' in text_lower or 'personnel' in text_lower) and not ('document' in text_lower or 'nda' in text_lower or 'contract' in text_lower):
+            # Delete entire employee record (not a document)
+            print(f"🔍 DEBUG: _extract_operation_type - detected delete_employee")
+            return 'delete_employee'
+        elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and ('employee' in text_lower or 'staff' in text_lower or 'worker' in text_lower or 'personnel' in text_lower):
+            print(f"🔍 DEBUG: _extract_operation_type - detected search_employees")
+            return 'search_employees'
+        elif 'upload' in text_lower and 'nda' in text_lower and not ('client' in text_lower or 'sangard' in text_lower or 'acme' in text_lower) and not ('contract' in text_lower or 'blake' in text_lower or 'international' in text_lower):
+            # NDA document upload without client - likely employee document
+            print(f"🔍 DEBUG: _extract_operation_type - detected upload_employee_document (NDA document without client)")
+            return 'upload_employee_document'
+        
+        # Client operations (check these after contract and employee operations)
+        elif ('update' in text_lower or 'set' in text_lower) and 'client' in text_lower:
+            return 'update_client'
+        elif ('create' in text_lower or 'add' in text_lower) and 'client' in text_lower:
+            return 'create_client'
+        elif 'delete' in text_lower and 'client' in text_lower:
+            return 'delete_client'
+        elif ('show' in text_lower or 'get' in text_lower or 'list' in text_lower) and 'client' in text_lower:
+            return 'get_client_details'
+        
         # Fallback to generic operations
-        elif 'update' in text_lower:
+        elif 'update' in text_lower or 'set' in text_lower:
             return 'update'
         elif 'delete' in text_lower:
             return 'delete'

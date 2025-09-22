@@ -62,9 +62,15 @@ class FuzzyClientMatcher:
                 if len(cleaned) < 3 or len(cleaned) > 50:
                     continue
                 
-                # Skip if it contains common non-client words
+                # Skip if it contains common non-client words (use word boundaries to avoid false positives)
                 skip_words = ['with', 'that', 'where', 'having', 'billing', 'prompt', 'date', 'amount', 'more', 'than', 'contract', 'all', 'show', 'me']
-                if any(word in cleaned.lower() for word in skip_words):
+                should_skip = False
+                for word in skip_words:
+                    # Use word boundaries to avoid false positives (e.g., "me" in "Acme")
+                    if re.search(r'\b' + re.escape(word) + r'\b', cleaned.lower()):
+                        should_skip = True
+                        break
+                if should_skip:
                     continue
                 
                 # Skip if it's mostly lowercase (likely not a company name)

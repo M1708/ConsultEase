@@ -7,7 +7,7 @@ class ContractAgent:
     """
     def __init__(self):
         """Initializes the agent with its specific instructions and tool schemas."""
-        self.instructions = "You are Milo, an expert assistant for contract management."
+        self.instructions = "You are Core, an expert assistant for contract management."
         self.tools = self._get_tool_schemas()
 
     def get_capabilities(self) -> Dict[str, Any]:
@@ -159,9 +159,12 @@ class ContractAgent:
                             "end_date": {"type": "string", "description": "New end date in YYYY-MM-DD format"},
                             "contract_type": {"type": "string", "description": "New contract type: Fixed, Hourly, or Retainer"},
                             "original_amount": {"type": "number", "description": "New original amount"},
+                            "current_amount": {"type": "number", "description": "New current amount"},
                             "billing_frequency": {"type": "string", "description": "New billing frequency: Monthly, Weekly, One-time"},
                             "billing_prompt_next_date": {"type": "string", "description": "New billing prompt date in YYYY-MM-DD format"},
                             "status": {"type": "string", "description": "New contract status"},
+                            "termination_date": {"type": "string", "description": "New termination date in YYYY-MM-DD format"},
+                            "amendments": {"type": "string", "description": "New or updated contract amendments"},
                             "notes": {"type": "string", "description": "New or updated notes"}
                         },
                         "required": ["client_name"]
@@ -207,9 +210,12 @@ class ContractAgent:
                             "end_date": {"type": "string", "description": "New end date in YYYY-MM-DD format"},
                             "contract_type": {"type": "string", "description": "New contract type: Fixed, Hourly, or Retainer"},
                             "original_amount": {"type": "number", "description": "New original amount"},
+                            "current_amount": {"type": "number", "description": "New current amount"},
                             "billing_frequency": {"type": "string", "description": "New billing frequency: Monthly, Weekly, One-time"},
                             "billing_prompt_next_date": {"type": "string", "description": "New billing prompt date in YYYY-MM-DD format"},
                             "status": {"type": "string", "description": "New contract status"},
+                            "termination_date": {"type": "string", "description": "New termination date in YYYY-MM-DD format"},
+                            "amendments": {"type": "string", "description": "New or updated contract amendments"},
                             "notes": {"type": "string", "description": "New or updated notes"}
                         },
                         "required": ["contract_id"]

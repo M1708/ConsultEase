@@ -279,7 +279,7 @@ async def fast_greeting(chat_request: ChatRequest, request: Request):
         # Return response
         response = ChatResponse(
             response=greeting_response,
-            agent="Milo",
+            agent="Core",
             success=True,
             timestamp=datetime.now().isoformat(),
             session_id=session_id,
@@ -301,7 +301,7 @@ async def fast_greeting(chat_request: ChatRequest, request: Request):
         
         return ChatResponse(
             response="Hello! How can I help you today?",
-            agent="Milo",
+            agent="Core",
             success=True,
             timestamp=datetime.now().isoformat(),
             session_id="fast-greeting",
@@ -385,7 +385,7 @@ async def fast_clients(chat_request: ChatRequest, request: Request):
             
             response = ChatResponse(
                 response=response_message,
-                agent="Milo",
+                agent="Core",
                 success=True,
                 timestamp=datetime.now().isoformat(),
                 session_id=current_user.session_id,
@@ -406,7 +406,7 @@ async def fast_clients(chat_request: ChatRequest, request: Request):
         print(f"Fast clients failed after {(end_time - start_time) * 1000:.2f}ms: {e}")
         return ChatResponse(
             response=f"I encountered an error retrieving clients: {str(e)}",
-            agent="Milo",
+            agent="Core",
             success=False,
             timestamp=datetime.now().isoformat(),
             session_id="error-session",
@@ -455,25 +455,33 @@ async def send_chat_message_with_file(
         # Now use the main database session for the rest of the function
         async with get_ai_db() as db:
             # Handle file upload if provided
-            file_data = None
             file_info = None
             if file and file.filename:
                 # Read file content
                 file_content = await file.read()
                 print(f"🔍 DEBUG: Raw file content length: {len(file_content)} bytes")
                 
+                # Encode to base64 for storage
                 file_data = base64.b64encode(file_content).decode('utf-8')
                 print(f"🔍 DEBUG: Base64 encoded length: {len(file_data)}")
                 
-                # Create file info for the agent
+                # Store file in cache and get reference
+                from src.aiagents.services.file_cache import file_cache
+                file_ref_id = file_cache.store_file(
+                    file_data=file_data,
+                    filename=file.filename,
+                    file_size=len(file_content),
+                    mime_type=file.content_type or "application/octet-stream"
+                )
+                
+                # Create file info with reference instead of full data
                 file_info = {
                     "filename": file.filename,
                     "mime_type": file.content_type or "application/octet-stream",
-                    "file_data": file_data,
+                    "file_ref_id": file_ref_id,  # Reference instead of full data
                     "file_size": len(file_content)
                 }
-                print(f"🔍 DEBUG: File processed - {file.filename} ({len(file_content)} bytes)")
-                print(f"🔍 DEBUG: File info file_data length: {len(file_info['file_data'])}")
+                print(f"🔍 DEBUG: File processed - {file.filename} ({len(file_content)} bytes), ref_id: {file_ref_id}")
                 
                 # Add file context to the message
                 message = f"{message}\n\n[File attached: {file.filename} ({file_info['file_size']} bytes)]"
@@ -506,8 +514,8 @@ async def send_chat_message_with_file(
             
             if is_greeting:
                 return {
-                    "response": f"Hello! I'm Milo, your ConsultEase AI assistant. How can I help you today?",
-                    "agent": "Milo",
+                    "response": f"Hello! I'm Core, your ConsultEase AI assistant. How can I help you today?",
+                    "agent": "Core",
                     "success": True,
                     "timestamp": datetime.now().isoformat(),
                     "session_id": session_id,
@@ -615,7 +623,7 @@ async def send_chat_message_with_file(
                 is_error = True
             
             # Determine the agent name
-            agent_name = "Milo"
+            agent_name = "Core"
             if "agent" in result.get("context", {}):
                 agent_name = result["context"]["agent"]
             
@@ -738,7 +746,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 
                 return ChatResponse(
                     response=greeting_response,
-                    agent="Milo",
+                    agent="Core",
                     success=True,
                     timestamp=datetime.now().isoformat(),
                     session_id=current_user.session_id,
@@ -769,7 +777,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 print(f"🔥 CHAT API: ULTRA-FAST SIMPLE INFO PATH!")
                 return ChatResponse(
                     response="I'm here to help with your consulting business needs. You can ask me about clients, contracts, employees, deliverables, time tracking, or expenses. What would you like to know?",
-                    agent="Milo",
+                    agent="Core",
                     success=True,
                     timestamp=datetime.now().isoformat(),
                     session_id="fast-simple-info",
@@ -799,16 +807,26 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 "show me all clients with their contracts", "show all clients with contracts",
                 # Billing-related queries that should go through contract_agent
                 "billing", "billing date", "billing prompt", "upcoming billing",
-                "next billing", "billing frequency", "contracts with billing"
+                "next billing", "billing frequency", "contracts with billing",
+                # Amount filtering queries that should go through contract_agent
+                "amount more than", "original amount more than", "amount greater than",
+                "original amount greater than", "more than $", "greater than $",
+                "contracts for all clients with", "contracts with amount"
             ]
             
+            # Check for complex queries FIRST (before simple queries)
             is_complex_client_query = any(query in message_lower for query in complex_client_queries)
+            # Only use ultra-fast path if it's a simple client query AND not a complex query
             is_simple_client_list = any(query in message_lower for query in client_queries) and not is_complex_client_query
+            
+            print(f"🔍 ULTRA-FAST DEBUG: message_lower='{message_lower}'")
+            print(f"🔍 ULTRA-FAST DEBUG: is_complex_client_query={is_complex_client_query}")
+            print(f"🔍 ULTRA-FAST DEBUG: is_simple_client_list={is_simple_client_list}")
             
             if is_simple_client_list:
                 print(f"🔥 CHAT API: ULTRA-FAST CLIENT LIST PATH!")
-                # Redirect to fast clients endpoint
-                return await fast_clients(request)
+                # Call fast clients logic directly instead of redirecting
+                return await fast_clients(chat_request, request)
             
             # For non-fast-path messages, proceed with LangGraph
             print(f"🔥 CHAT API: Processing complex query...")
@@ -1102,7 +1120,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
                 "Recursion limit"
             ])
             
-            # 5. Return JSON response with "Milo" as agent name
+            # 5. Return JSON response with "Core" as agent name
             # Safe data extraction with fallbacks
             agent_response_times = {}
             if isinstance(result, dict) and "agent_response_times" in result:
@@ -1120,7 +1138,7 @@ async def send_chat_message(chat_request: ChatRequest, request: Request):
             
             final_response = ChatResponse(
                 response=response_content,
-                agent="Milo",
+                agent="Core",
                 success=not is_error,  # TODO: ERROR HANDLING - Set success based on error detection
                 timestamp=datetime.now().isoformat(),
                 session_id=current_user.session_id,

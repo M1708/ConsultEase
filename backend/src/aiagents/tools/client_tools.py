@@ -92,9 +92,32 @@ async def update_client_tool(params: UpdateClientParams, context: Dict[str, Any]
             await session.commit()
             await session.refresh(client)
             
+            # Build user-friendly success message
+            def get_friendly_field_name(field):
+                field_mapping = {
+                    'industry': 'industry',
+                    'primary_contact_name': 'contact name',
+                    'primary_contact_email': 'contact email',
+                    'company_size': 'company size',
+                    'notes': 'notes'
+                }
+                return field_mapping.get(field, field.replace('_', ' '))
+            
+            if len(update_fields) == 1:
+                friendly_field = get_friendly_field_name(update_fields[0])
+                message = f"✅ Successfully updated client '{client.client_name}'. Updated: {friendly_field}."
+            else:
+                friendly_fields = [get_friendly_field_name(field) for field in update_fields]
+                if len(friendly_fields) == 2:
+                    message = f"✅ Successfully updated client '{client.client_name}'. Updated: {friendly_fields[0]} and {friendly_fields[1]}."
+                else:
+                    last_field = friendly_fields[-1]
+                    other_fields = ', '.join(friendly_fields[:-1])
+                    message = f"✅ Successfully updated client '{client.client_name}'. Updated: {other_fields}, and {last_field}."
+            
             return ClientToolResult(
                 success=True,
-                message=f"✅ Successfully updated client '{client.client_name}'. Updated fields: {', '.join(update_fields)}",
+                message=message,
                 data={
                     "client_id": client.client_id,
                     "client_name": client.client_name,
@@ -167,7 +190,7 @@ async def get_client_details_tool(client_name: str) -> ClientToolResult:
                             document_url = f"/api/contracts/{contract.contract_id}/document"
                             document_info = f"📄 [{contract.document_filename}]({document_url})"
                     else:
-                        document_info = "No document"
+                        document_info = "No contract document"
                     
                     contract_details += f"""
 **Contract {i} (ID: {contract.contract_id}):**
@@ -182,7 +205,7 @@ async def get_client_details_tool(client_name: str) -> ClientToolResult:
 - **Next Billing Date:** {next_billing}
 - **Termination Date:** {termination}
 - **Notes:** {notes}
-- **Document:** {document_info}
+- **Contract Document:** {document_info}
 """
                 client_info += contract_details
             else:

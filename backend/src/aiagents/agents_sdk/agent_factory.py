@@ -168,7 +168,7 @@ class AgentFactory:
                 Always be precise with contract details and ask for clarification when needed.
                 Use the available tools to perform contract operations.""",
                 "model": "gpt-4o-mini",
-                "tools": ["create_contract", "update_contract", "search_contracts", "get_contract_details"]
+                "tools": ["create_contract", "update_contract", "search_contracts", "get_contract_details", "get_contracts_by_amount"]
             },
             "client_agent": {
                 "instructions": """You are a client relationship specialist. You help users with:

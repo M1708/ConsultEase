@@ -10,7 +10,7 @@ class ClientAgent:
     """
     def __init__(self):
         """Initializes the agent with its specific instructions and tool schemas."""
-        self.instructions = "You are Milo, an AI assistant."
+        self.instructions = "You are Core, an AI assistant."
         self.tools = self._get_tool_schemas()
         self.memory_manager = ConversationMemoryManager()
         self.context_manager = ContextManager()

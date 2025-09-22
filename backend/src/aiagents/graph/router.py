@@ -314,6 +314,15 @@ def master_router_node_sync(state: AgentState) -> Dict:
                 update_state_for_handoff(state, agent_name, reasoning)
                 print(f"🔄 Agent Handoff: {state.get('previous_agent', 'unknown')} → {agent_name}")
             
+            # CRITICAL FIX: Directly update the state instead of relying on LangGraph merge
+            state['current_agent'] = agent_name
+            if 'data' not in state:
+                state['data'] = {}
+            state['data']['current_agent'] = agent_name
+            print(f"🔍 DEBUG: Sync router - directly updated state current_agent to: {agent_name}")
+            print(f"🔍 DEBUG: Sync router - state['current_agent'] = {state.get('current_agent')}")
+            print(f"🔍 DEBUG: Sync router - state['data']['current_agent'] = {state.get('data', {}).get('current_agent')}")
+            
             return {"current_agent": agent_name}
             
         elif function_name == "handle_greeting":

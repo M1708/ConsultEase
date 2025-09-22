@@ -1,7 +1,7 @@
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, func
+from sqlalchemy import select, or_, and_, func, text
 from sqlalchemy.orm import selectinload
 from datetime import date, timedelta, datetime
 from dateutil.relativedelta import relativedelta
@@ -54,6 +54,7 @@ class UploadContractDocumentParams(BaseModel):
     filename: str
     file_size: int
     mime_type: str
+    user_confirmed: Optional[bool] = False  # TODO: CONFIRMATION FIX - Add confirmation parameter
 
 class UpdateContractParams(BaseModel):
     client_name: str 
@@ -64,9 +65,12 @@ class UpdateContractParams(BaseModel):
     end_date: Optional[str] = None
     contract_type: Optional[str] = None
     original_amount: Optional[float] = None
+    current_amount: Optional[float] = None  # Add current_amount field
     billing_frequency: Optional[str] = None
     billing_prompt_next_date: Optional[str] = None
     status: Optional[str] = None
+    termination_date: Optional[str] = None  # Add termination_date field
+    amendments: Optional[str] = None  # Add amendments field
     notes: Optional[str] = None
 
 async def update_specific_contract(contract: Contract, params: UpdateContractParams, session) -> ContractToolResult:
@@ -88,6 +92,9 @@ async def update_specific_contract(contract: Contract, params: UpdateContractPar
             contract.original_amount = params.original_amount
             contract.current_amount = params.original_amount  # Update current amount too
             updated_fields.append("original_amount")
+        if params.current_amount is not None:
+            contract.current_amount = params.current_amount
+            updated_fields.append("current_amount")
         if params.billing_frequency:
             contract.billing_frequency = params.billing_frequency
             updated_fields.append("billing_frequency")
@@ -97,6 +104,12 @@ async def update_specific_contract(contract: Contract, params: UpdateContractPar
         if params.status:
             contract.status = params.status
             updated_fields.append("status")
+        if params.termination_date:
+            contract.termination_date = datetime.strptime(params.termination_date, "%Y-%m-%d").date()
+            updated_fields.append("termination_date")
+        if params.amendments is not None:
+            contract.amendments = params.amendments
+            updated_fields.append("amendments")
         if params.notes is not None:
             contract.notes = params.notes
             updated_fields.append("notes")
@@ -106,9 +119,36 @@ async def update_specific_contract(contract: Contract, params: UpdateContractPar
         
         await session.commit()
         
+        # Build user-friendly success message
+        def get_friendly_field_name(field):
+            field_mapping = {
+                'billing_prompt_next_date': 'billing date',
+                'billing_frequency': 'billing frequency',
+                'original_amount': 'contract amount',
+                'current_amount': 'current amount',
+                'contract_type': 'contract type',
+                'status': 'status',
+                'start_date': 'start date',
+                'end_date': 'end date',
+                'termination_date': 'end date',
+                'amendments': 'amendments',
+                'notes': 'notes'
+            }
+            return field_mapping.get(field, field.replace('_', ' '))
+        
         message = f"✅ Successfully updated contract {contract.contract_id} for {contract.client.client_name}"
         if updated_fields:
-            message += f". Updated fields: {', '.join(updated_fields)}"
+            if len(updated_fields) == 1:
+                friendly_field = get_friendly_field_name(updated_fields[0])
+                message += f". Updated: {friendly_field}."
+            else:
+                friendly_fields = [get_friendly_field_name(field) for field in updated_fields]
+                if len(friendly_fields) == 2:
+                    message += f". Updated: {friendly_fields[0]} and {friendly_fields[1]}."
+                else:
+                    last_field = friendly_fields[-1]
+                    other_fields = ', '.join(friendly_fields[:-1])
+                    message += f". Updated: {other_fields}, and {last_field}."
         
         return ContractToolResult(
             success=True,
@@ -278,13 +318,15 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                             success=False,
                             message=f"❌ Could not extract contract ID from '{params.user_response}'. Please provide a valid contract ID number, or say 'all' to update all contracts."
                         )
-            elif len(contracts) == 1:
-                # Only one contract, use it directly
-                contract = contracts[0]
-            elif params.update_all:
+            
+            # Check if user wants to update all contracts
+            if params.update_all:
                 # User wants to update all contracts - proceed with update
                 # contracts_to_update will be set to all contracts below
                 pass
+            elif len(contracts) == 1:
+                # Only one contract, use it directly
+                contract = contracts[0]
             else:
                 # Multiple contracts - ask user to choose
                 contract_list = []
@@ -349,6 +391,10 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                     update_data["original_amount"] = params.original_amount
                     update_fields.append("original_amount")
                 
+                if params.current_amount is not None:
+                    update_data["current_amount"] = params.current_amount
+                    update_fields.append("current_amount")
+                
                 if params.billing_frequency:
                     update_data["billing_frequency"] = params.billing_frequency
                     update_fields.append("billing_frequency")
@@ -366,6 +412,20 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                 if params.status:
                     update_data["status"] = params.status
                     update_fields.append("status")
+                
+                if params.termination_date:
+                    try:
+                        update_data["termination_date"] = datetime.strptime(params.termination_date, "%Y-%m-%d").date()
+                        update_fields.append("termination_date")
+                    except ValueError:
+                        return ContractToolResult(
+                            success=False,
+                            message=f"❌ Invalid termination date format. Please use YYYY-MM-DD format."
+                        )
+                
+                if params.amendments:
+                    update_data["amendments"] = params.amendments
+                    update_fields.append("amendments")
                 
                 if params.notes:
                     update_data["notes"] = params.notes
@@ -416,6 +476,10 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                         contract_to_update.original_amount = params.original_amount
                         contract_updated_fields.append("original_amount")
                     
+                    if params.current_amount is not None:
+                        contract_to_update.current_amount = params.current_amount
+                        contract_updated_fields.append("current_amount")
+                    
                     if params.billing_frequency:
                         contract_to_update.billing_frequency = params.billing_frequency
                         contract_updated_fields.append("billing_frequency")
@@ -433,6 +497,20 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                     if params.status:
                         contract_to_update.status = params.status
                         contract_updated_fields.append("status")
+                    
+                    if params.termination_date:
+                        try:
+                            contract_to_update.termination_date = datetime.strptime(params.termination_date, "%Y-%m-%d").date()
+                            contract_updated_fields.append("termination_date")
+                        except ValueError:
+                            return ContractToolResult(
+                                success=False,
+                                message=f"❌ Invalid termination date format. Please use YYYY-MM-DD format."
+                            )
+                    
+                    if params.amendments:
+                        contract_to_update.amendments = params.amendments
+                        contract_updated_fields.append("amendments")
                     
                     if params.notes:
                         contract_to_update.notes = params.notes
@@ -456,13 +534,49 @@ async def update_contract_tool(params: UpdateContractParams, context: Dict[str, 
                 for contract_to_update in contracts_to_update:
                     await session.refresh(contract_to_update)
             
-            # Build success message
+            # Build user-friendly success message
+            def get_friendly_field_name(field):
+                field_mapping = {
+                    'billing_prompt_next_date': 'billing date',
+                    'billing_frequency': 'billing frequency',
+                    'original_amount': 'contract amount',
+                    'current_amount': 'current amount',
+                    'contract_type': 'contract type',
+                    'status': 'status',
+                    'start_date': 'start date',
+                    'end_date': 'end date',
+                    'termination_date': 'end date',
+                    'amendments': 'amendments',
+                    'notes': 'notes'
+                }
+                return field_mapping.get(field, field.replace('_', ' '))
+            
             if params.update_all:
-                message = f"✅ Successfully updated {len(contracts_to_update)} contracts for '{client.client_name}'. Updated fields: {', '.join(update_fields)}"
+                if len(update_fields) == 1:
+                    friendly_field = get_friendly_field_name(update_fields[0])
+                    message = f"✅ Successfully updated {len(contracts_to_update)} contracts for '{client.client_name}'. Updated: {friendly_field}."
+                else:
+                    friendly_fields = [get_friendly_field_name(field) for field in update_fields]
+                    if len(friendly_fields) == 2:
+                        message = f"✅ Successfully updated {len(contracts_to_update)} contracts for '{client.client_name}'. Updated: {friendly_fields[0]} and {friendly_fields[1]}."
+                    else:
+                        last_field = friendly_fields[-1]
+                        other_fields = ', '.join(friendly_fields[:-1])
+                        message = f"✅ Successfully updated {len(contracts_to_update)} contracts for '{client.client_name}'. Updated: {other_fields}, and {last_field}."
             else:
                 # Include contract ID in single contract update message
                 contract_id = contracts_to_update[0].contract_id if contracts_to_update else "Unknown"
-                message = f"✅ Successfully updated contract {contract_id} for '{client.client_name}'. Updated fields: {', '.join(update_fields)}"
+                if len(update_fields) == 1:
+                    friendly_field = get_friendly_field_name(update_fields[0])
+                    message = f"✅ Successfully updated contract {contract_id} for '{client.client_name}'. Updated: {friendly_field}."
+                else:
+                    friendly_fields = [get_friendly_field_name(field) for field in update_fields]
+                    if len(friendly_fields) == 2:
+                        message = f"✅ Successfully updated contract {contract_id} for '{client.client_name}'. Updated: {friendly_fields[0]} and {friendly_fields[1]}."
+                    else:
+                        last_field = friendly_fields[-1]
+                        other_fields = ', '.join(friendly_fields[:-1])
+                        message = f"✅ Successfully updated contract {contract_id} for '{client.client_name}'. Updated: {other_fields}, and {last_field}."
             
             
             return ContractToolResult(
@@ -637,7 +751,7 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                                 storage_service = SupabaseStorageService()
                                 download_url = storage_service.get_contract_document_url(c.document_file_path) if c.document_file_path else f"/contracts/{c.contract_id}/document"
                                 
-                                document_info = f" 📄 *Has document: [{c.document_filename}]({download_url}) ({file_size_display}, uploaded {uploaded_date})*"
+                                document_info = f" 📄 *Has contract document: [{c.document_filename}]({download_url}) ({file_size_display}, uploaded {uploaded_date})*"
                             
                             contract_list.append(f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date}){document_info}")
 
@@ -658,9 +772,45 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
             if not contract:
                 contract = contracts[0]
             
+            # TODO: CONFIRMATION FIX - Check if user has confirmed the replacement
+            # Also check if the last user message was a confirmation
+            is_confirmation = params.user_confirmed
+            print(f"🔍 DEBUG CONFIRMATION: params.user_confirmed = {params.user_confirmed}")
+            
+            # TODO: CONFIRMATION FIX - If not explicitly confirmed, check if last user message was "yes" or a contract ID
+            if not is_confirmation and context:
+                messages = context.get('messages', [])
+                print(f"🔍 DEBUG CONFIRMATION: Found {len(messages)} messages in context")
+                if messages:
+                    last_message = messages[-1]
+                    print(f"🔍 DEBUG CONFIRMATION: Last message type: {type(last_message)}")
+                    if isinstance(last_message, dict) and last_message.get('role') == 'user':
+                        content = last_message.get('content', '').lower().strip()
+                        print(f"🔍 DEBUG CONFIRMATION: Last user message content: '{content}'")
+                        
+                        # Check for confirmation words
+                        if content in ['yes', 'y', 'ok', 'okay', 'confirm', 'proceed', 'go ahead', 'sure', 'alright']:
+                            is_confirmation = True
+                            print(f"🔍 DEBUG CONFIRMATION: ✅ Detected confirmation from last user message: '{content}'")
+                        # TODO: CONFIRMATION FIX - Also check if this is a contract ID response in upload workflow
+                        elif content.isdigit() and params.contract_id and str(params.contract_id) == content:
+                            # This is a contract ID response in an upload workflow - treat as confirmation
+                            is_confirmation = True
+                            print(f"🔍 DEBUG CONFIRMATION: ✅ Detected contract ID response as confirmation: '{content}'")
+                        else:
+                            print(f"🔍 DEBUG CONFIRMATION: ❌ Not a confirmation word or contract ID: '{content}'")
+                    else:
+                        print(f"🔍 DEBUG CONFIRMATION: Last message is not a user message or not dict")
+                else:
+                    print(f"🔍 DEBUG CONFIRMATION: No messages found in context")
+            else:
+                print(f"🔍 DEBUG CONFIRMATION: is_confirmation already True or no context")
+            
+            print(f"🔍 DEBUG CONFIRMATION: Final is_confirmation = {is_confirmation}")
+            
             # Check if contract already has a document
-            if contract.document_filename:
-                # Show existing document information
+            if contract.document_filename and not is_confirmation:
+                # Show existing document information and ask for confirmation
                 if contract.document_file_size and contract.document_file_size > 0:
                     existing_file_size_mb = contract.document_file_size / (1024 * 1024)
                     existing_file_size_display = f"{existing_file_size_mb:.2f} MB" if existing_file_size_mb >= 1 else f"{contract.document_file_size} bytes"
@@ -671,15 +821,17 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                 storage_service = SupabaseStorageService()
                 existing_download_url = storage_service.get_contract_document_url(contract.document_file_path) if contract.document_file_path else f"/contracts/{contract.contract_id}/document"
                 
-                existing_message = f"📄 **Contract {contract.contract_id} already has a document uploaded:**\n\n- **Filename:** [{contract.document_filename}]({existing_download_url})\n- **File Size:** {existing_file_size_display}\n- **Uploaded At:** {contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else 'N/A'}\n\n⚠️ **Uploading a new document will replace the existing one.**\n\nProceeding with upload..."
+                existing_message = f"📄 **Contract {contract.contract_id} already has a contract document uploaded:**\n\n- **Filename:** [{contract.document_filename}]({existing_download_url})\n- **File Size:** {existing_file_size_display}\n- **Uploaded At:** {contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else 'N/A'}\n\n⚠️ **Uploading a new contract document will replace the existing one.**\n\n**Please confirm:** Enter 'yes' to continue and replace the existing contract document, or 'no' to cancel."
                 
-                # Return the existing document info first
+                # Return the existing document info first with confirmation needed status
                 return ContractToolResult(
-                    success=True,
+                    success=False,  # Set to False to indicate action needed
                     message=existing_message,
                     data={
                         "contract_id": contract.contract_id,
                         "client_name": contract.client.client_name,
+                        "confirmation_needed": True,
+                        "current_workflow": "upload",  # Set workflow for confirmation handling
                         "existing_document": {
                             "filename": contract.document_filename,
                             "file_size": contract.document_file_size,
@@ -689,6 +841,10 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                         }
                     }
                 )
+            
+            # TODO: CONFIRMATION FIX - If user confirmed, proceed with upload
+            if is_confirmation:
+                print(f"🔍 DEBUG: User confirmed replacement, proceeding with upload")
             
             # Upload document using storage service
             storage_service = SupabaseStorageService()
@@ -785,7 +941,7 @@ async def upload_contract_document_tool(params: UploadContractDocumentParams, co
                     context_note = "\n\n💡 *Document uploaded to the recently created contract*"
                 
                 # Create the final message
-                final_message = f"✅ Contract document uploaded successfully for **{contract.client.client_name}**\n\n📄 **Document Details:**\n- **Filename:** [{contract.document_filename}]({download_url})\n- **File Size:** {file_size_display}\n- **Contract ID:** {contract.contract_id}\n- **Uploaded At:** {contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else 'N/A'}{context_note}"
+                final_message = f"✅ Contract document uploaded successfully for **{contract.client.client_name}**\n\n📄 **Contract Document Details:**\n- **Filename:** [{contract.document_filename}]({download_url})\n- **File Size:** {file_size_display}\n- **Contract ID:** {contract.contract_id}\n- **Uploaded At:** {contract.document_uploaded_at.strftime('%B %d, %Y, %I:%M %p') if contract.document_uploaded_at else 'N/A'}{context_note}"
                 
                 return ContractToolResult(
                     success=True,
@@ -931,9 +1087,11 @@ async def search_clients_tool(search_term: Optional[str] = None, limit: int = 10
         async with get_ai_db() as session:
             query = select(Client)
             if search_term:
+                # Use text() to avoid prepared statement conflicts with PgBouncer
+                from sqlalchemy import text
                 query = query.filter(
-                    Client.client_name.ilike(f"%{search_term}%") |
-                    Client.industry.ilike(f"%{search_term}%")
+                    text("lower(client_name) LIKE lower(:search_term) OR lower(industry) LIKE lower(:search_term)")
+                    .params(search_term=f"%{search_term}%")
                 )
             
             # Execute the query with limit
@@ -1110,7 +1268,7 @@ async def get_contracts_by_client_tool(client_name: str, context: Optional[Dict[
                             document_url = f"/api/contracts/{contract.contract_id}/document"
                             document_info = f"📄 [{contract.document_filename}]({document_url})"
                     else:
-                        document_info = "No document"
+                        document_info = "No contract document"
                     
                     contract_details += f"""
 **Contract {i} (ID: {contract.contract_id}):**
@@ -1123,7 +1281,7 @@ async def get_contracts_by_client_tool(client_name: str, context: Optional[Dict[
 - **End Date:** {end_date}
 - **Next Billing Date:** {next_billing}
 - **Termination Date:** {termination}
-- **Document:** {document_info}
+- **Contract Document:** {document_info}
 - **Notes:** {notes}
 """
             else:
@@ -1261,7 +1419,8 @@ async def get_contracts_for_next_month_billing_tool(client_name: str = None, con
             
             # Add client filter if specified
             if client_name:
-                stmt = stmt.where(Client.client_name.ilike(f"%{client_name}%"))
+                from sqlalchemy import text
+                stmt = stmt.where(text("lower(client_name) LIKE lower(:client_name)").params(client_name=f"%{client_name}%"))
                 print(f"🔍 DEBUG: get_contracts_for_next_month_billing - filtered by client: {client_name}")
             contracts_temp = await session.execute(stmt)
             contracts = contracts_temp.scalars().all()
@@ -1343,7 +1502,7 @@ async def get_contracts_with_null_billing_tool(client_name: str = None, context:
             
             # Add client filter if specified
             if client_name:
-                stmt = stmt.where(Client.client_name.ilike(f"%{client_name}%"))
+                stmt = stmt.where(text("lower(client_name) LIKE lower(:client_name)").params(client_name=f"%{client_name}%"))
             
             contracts_result = await session.execute(stmt)
             contracts = contracts_result.scalars().all()
@@ -1370,20 +1529,47 @@ async def get_contracts_with_null_billing_tool(client_name: str = None, context:
                 message = f"📋 **All contracts with no billing prompt date set:**\n"
             
             if contract_list:
-                for i, contract in enumerate(contracts, 1):
-                    amount = f"${contract.original_amount:,.2f}" if contract.original_amount else "Not set"
-                    current_amount = f"${contract.current_amount:,.2f}" if contract.current_amount else amount
-                    status = contract.status.title()
+                # Group contracts by client name
+                contracts_by_client = {}
+                for contract in contracts:
+                    client_name_key = contract.client.client_name
+                    if client_name_key not in contracts_by_client:
+                        contracts_by_client[client_name_key] = []
+                    contracts_by_client[client_name_key].append(contract)
+                
+                # Display contracts grouped by client
+                contract_counter = 1
+                for client_name_key, client_contracts in contracts_by_client.items():
+                    # Show client header only if there are multiple clients
+                    if not client_name and len(contracts_by_client) > 1:
+                        message += f"\n**{client_name_key}:**\n"
                     
-                    message += f"\n**Contract {i} (ID: {contract.contract_id}) - {contract.client.client_name}:**"
-                    message += f"\n- **Type:** {contract.contract_type}"
-                    message += f"\n- **Status:** {status}"
-                    message += f"\n- **Original Amount:** {amount}"
-                    message += f"\n- **Current Amount:** {current_amount}"
-                    message += f"\n- **Billing Frequency:** {contract.billing_frequency or 'Not set'}"
-                    message += f"\n- **Next Billing Date:** Not set"
-                    message += f"\n- **Contact:** {contract.client.primary_contact_name or 'Not specified'} ({contract.client.primary_contact_email or 'Not specified'})"
-                    message += f"\n"
+                    for contract in client_contracts:
+                        amount = f"${contract.original_amount:,.2f}" if contract.original_amount else "Not set"
+                        current_amount = f"${contract.current_amount:,.2f}" if contract.current_amount else amount
+                        status = contract.status.title()
+                        
+                        # Show client name in contract header only if there's a single client or if client_name is specified
+                        if client_name or len(contracts_by_client) == 1:
+                            message += f"\n**Contract {contract_counter} (ID: {contract.contract_id}) - {contract.client.client_name}:**"
+                        else:
+                            message += f"\n**Contract {contract_counter} (ID: {contract.contract_id}):**"
+                        
+                        message += f"\n- **Type:** {contract.contract_type}"
+                        message += f"\n- **Status:** {status}"
+                        message += f"\n- **Original Amount:** {amount}"
+                        message += f"\n- **Current Amount:** {current_amount}"
+                        message += f"\n- **Billing Frequency:** {contract.billing_frequency or 'Not set'}"
+                        message += f"\n- **Next Billing Date:** Not set"
+                        
+                        # Show contact info only if there are multiple clients or if client_name is specified
+                        if not client_name and len(contracts_by_client) > 1:
+                            message += f"\n- **Contact:** {contract.client.primary_contact_name or 'Not specified'} ({contract.client.primary_contact_email or 'Not specified'})"
+                        elif client_name:
+                            message += f"\n- **Contact:** {contract.client.primary_contact_name or 'Not specified'} ({contract.client.primary_contact_email or 'Not specified'})"
+                        
+                        message += f"\n"
+                        contract_counter += 1
             else:
                 message += "\nNo contracts found with null billing prompt dates."
             
@@ -1419,7 +1605,7 @@ async def get_contracts_by_amount_tool(min_amount: float = None, max_amount: flo
             
             # Add client filter if specified
             if client_name:
-                stmt = stmt.where(Client.client_name.ilike(f"%{client_name}%"))
+                stmt = stmt.where(text("lower(client_name) LIKE lower(:client_name)").params(client_name=f"%{client_name}%"))
             
             contracts_result = await session.execute(stmt)
             contracts = contracts_result.scalars().all()
@@ -1444,9 +1630,9 @@ async def get_contracts_by_amount_tool(min_amount: float = None, max_amount: flo
             if min_amount is not None and max_amount is not None:
                 amount_filter = f" with amount between ${min_amount:,.2f} and ${max_amount:,.2f}"
             elif min_amount is not None:
-                amount_filter = f" with amount >= ${min_amount:,.2f}"
+                amount_filter = f" with amount greater than ${min_amount:,.2f}"
             elif max_amount is not None:
-                amount_filter = f" with amount <= ${max_amount:,.2f}"
+                amount_filter = f" with amount less than ${max_amount:,.2f}"
             
             if client_name:
                 message = f"📋 **Contracts for {client_name}{amount_filter}:**\n"
@@ -1540,11 +1726,11 @@ async def search_contracts_tool(params: SearchContractsParams, context: Dict[str
 
             if params.min_amount is not None:
                 stmt = stmt.where(Contract.original_amount >= params.min_amount)
-                filters_applied.append(f"amount >= ${params.min_amount:,.2f}")
+                filters_applied.append(f"amount greater than ${params.min_amount:,.2f}")
 
             if params.max_amount is not None:
                 stmt = stmt.where(Contract.original_amount <= params.max_amount)
-                filters_applied.append(f"amount <= ${params.max_amount:,.2f}")
+                filters_applied.append(f"amount less than ${params.max_amount:,.2f}")
 
             if params.start_date_from:
                 try:
@@ -1929,32 +2115,50 @@ async def delete_contract_document_tool(params: DeleteContractDocumentParams) ->
                     )
                 contracts = [contract]
             else:
-                # Get all contracts for client to show list
+                # Get only contracts that have documents uploaded
                 contract_result = await session.execute(
                     select(Contract).options(
                         selectinload(Contract.client)
-                    ).filter(Contract.client_id == client.client_id)
+                    ).filter(
+                        and_(
+                            Contract.client_id == client.client_id,
+                            Contract.document_filename.isnot(None),
+                            Contract.document_filename != ""
+                        )
+                    )
                 )
                 contracts = contract_result.scalars().all()
+                
+                # Handle case where no contracts have documents
                 if not contracts:
                     return ContractToolResult(
                         success=False,
-                        message=f"❌ No contracts found for client '{params.client_name}'"
+                        message=f"❌ No contracts with uploaded documents found for client '{params.client_name}'.\n\nAll contracts for this client either have no contract documents uploaded or the documents have been removed."
                     )
                 
-                # If multiple contracts, ask user to specify which one
+                # If multiple contracts with documents, ask user to specify which one
                 if len(contracts) > 1:
                     contract_list = []
+                    storage_service = SupabaseStorageService()
+                    
                     for i, c in enumerate(contracts, 1):
                         amount = f"${c.original_amount:,.2f}" if c.original_amount else "N/A"
                         status = c.status.lower()
                         start_date = str(c.start_date) if c.start_date else "Not set"
-                        contract_info = f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})"
+                        
+                        # Add download link for the document
+                        if c.document_filename:
+                            download_url = storage_service.get_contract_document_url(c.document_file_path) if c.document_file_path else f"/contracts/{c.contract_id}/document"
+                            document_info = f"📄 [Download: {c.document_filename}]({download_url})"
+                        else:
+                            document_info = "No contract document"
+                        
+                        contract_info = f"{i}. **Contract ID {c.contract_id}**: {c.contract_type} ({amount}) - {status} (Start: {start_date})\n   {document_info}"
                         contract_list.append(contract_info)
                     
                     return ContractToolResult(
                         success=False,
-                        message=f"🔍 {client.client_name} has {len(contracts)} contracts. Here are the details:\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to delete the document for (e.g., 'delete contract document for {client.client_name} contract {contracts[0].contract_id}')"
+                        message=f"🔍 **Contracts with uploaded documents for '{client.client_name}' (select one to delete):**\n\n" + "\n".join(contract_list) + f"\n\nPlease specify which contract ID you want to delete the document for (e.g., 'delete contract document for {client.client_name} contract {contracts[0].contract_id}')"
                     )
             
             # Delete documents
@@ -2181,23 +2385,11 @@ async def delete_client_tool(params: DeleteClientParams) -> ContractToolResult:
                 client = None
             
             if not client:
-                # Check if user is confirming deletion of non-existent client
-                confirmation_keywords = ['yes', 'y', 'confirm', 'ok', 'okay', 'alright', 'go ahead', 'proceed', 'delete', 'sure']
-                user_confirmed = (params.user_response and 
-                                any(keyword in params.user_response.lower().strip() for keyword in confirmation_keywords))
-                
-                if user_confirmed:
-                    # User confirmed deletion of non-existent client
-                    return ContractToolResult(
-                        success=False,
-                        message=f"❌ Client '{params.client_name}' not found"
-                    )
-                else:
-                    # Show warning for non-existent client
-                    return ContractToolResult(
-                        success=True,
-                        message=f"⚠️ **WARNING: You are about to delete client '{params.client_name}'**\n\n**Note:** This client does not exist in the system.\n\n**This action will permanently delete:**\n- All associated contracts (if any)\n- All contract documents\n- All client contact information\n- All billing history\n\n**Respond with 'yes', 'ok', 'alright', or 'go ahead' to confirm deletion.**"
-                    )
+                # Client not found - simply inform the user
+                return ContractToolResult(
+                    success=False,
+                    message=f"❌ Client '{params.client_name}' not found in the system. Please check the client name and try again."
+                )
             
             # Get all contracts for this client
             contracts_result = await session.execute(
@@ -2375,7 +2567,7 @@ async def get_contracts_with_documents_tool(params: SearchContractsParams, conte
                 storage_service = SupabaseStorageService()
                 download_url = storage_service.get_contract_document_url(contract.document_file_path) if contract.document_file_path else f"/contracts/{contract.contract_id}/document"
                 
-                contract_info += f"- **Document:** [{contract.document_filename}]({download_url})\n"
+                contract_info += f"- **Contract Document:** [{contract.document_filename}]({download_url})\n"
                 contract_info += f"- **File Size:** {file_size_display}\n"
                 contract_info += f"- **Uploaded:** {uploaded_date}\n"
                 
@@ -2383,7 +2575,7 @@ async def get_contracts_with_documents_tool(params: SearchContractsParams, conte
             
             # Create response message
             client_msg = f" for **{params.client_name}**" if params.client_name else ""
-            response_message = f"📄 **Contracts with uploaded documents{client_msg}:**\n\n" + "\n\n".join(contract_list)
+            response_message = f"📄 **Contracts with uploaded contract documents{client_msg}:**\n\n" + "\n\n".join(contract_list)
             
             return ContractToolResult(
                 success=True,

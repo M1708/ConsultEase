@@ -308,8 +308,7 @@ class EmployeeBase(BaseModel):
     rate_type: Optional[str] = Field(None, max_length=20)  # hourly, salary, project_based
     rate: Optional[Decimal] = Field(None, ge=0)
     currency: str = Field(default="USD", max_length=3)
-    nda_file_link: Optional[str] = Field(None, max_length=500)
-    contract_file_link: Optional[str] = Field(None, max_length=500)
+    # Legacy fields removed - using nda_document_file_path and contract_document_file_path
 
     @validator('employment_type')
     def validate_employment_type(cls, v):
@@ -355,8 +354,7 @@ class EmployeeUpdate(BaseModel):
     rate_type: Optional[str] = Field(None, max_length=20)
     rate: Optional[Decimal] = Field(None, ge=0)
     currency: Optional[str] = Field(None, max_length=3)
-    nda_file_link: Optional[str] = Field(None, max_length=500)
-    contract_file_link: Optional[str] = Field(None, max_length=500)
+    # Legacy fields removed - using nda_document_file_path and contract_document_file_path
     # Enhanced document fields for NDA
     nda_document_bucket_name: Optional[str] = Field(None, max_length=50)
     nda_document_file_size: Optional[int] = Field(None, ge=0)

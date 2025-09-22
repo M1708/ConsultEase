@@ -74,12 +74,78 @@ workflow.set_entry_point("router")
 def enhanced_router(state: AgentState) -> str:
     """Enhanced router that considers SDK availability"""
     print(f"🔍 DEBUG: enhanced_router called with state keys: {list(state.keys()) if isinstance(state, dict) else 'Not a dict'}")
+    print(f"🔍 DEBUG: enhanced_router state: {state}")
 
     try:
+        # 🔧 CRITICAL FIX: Check for employee operations first and bypass everything else
+        if state.get('messages'):
+            last_message = state['messages'][-1]
+            if isinstance(last_message, dict) and 'content' in last_message:
+                message_content = last_message['content'].lower()
+                print(f"🔍 DEBUG: enhanced_router - checking message: '{message_content}'")
+                print(f"🔍 DEBUG: enhanced_router - checking for amount filtering patterns...")
+                if 'amount' in message_content and ('more than' in message_content or 'greater than' in message_content) and 'contract' in message_content:
+                    print(f"🔍 DEBUG: enhanced_router - DETECTED AMOUNT FILTERING PATTERN!")
+                
+                # Check for employee document deletion patterns specifically
+                if ('delete' in message_content and 'document' in message_content and 
+                    any(word in message_content for word in ['employee', 'staff', 'worker', 'personnel'])):
+                    print(f"🔍 DEBUG: enhanced_router - DETECTED EMPLOYEE DOCUMENT DELETION, forcing employee_agent")
+                    state['current_agent'] = 'employee_agent'
+                    if 'data' not in state:
+                        state['data'] = {}
+                    state['data']['current_agent'] = 'employee_agent'
+                    state['data']['routing_completed'] = True
+                    return 'employee_agent'
+                
+                # General employee operations check
+                if any(pattern in message_content for pattern in ['employee', 'staff', 'worker', 'personnel', 'details for employee', 'show details for', 'full time', 'part time', 'full-time', 'part-time', 'update employee', 'update committed hours', 'update rate', 'update job title', 'update department', 'delete contract document for employee', 'delete nda document for employee', 'delete document for employee']) or ('upload' in message_content and ('employee' in message_content or 'staff' in message_content or 'worker' in message_content or 'personnel' in message_content)) or ('delete' in message_content and ('employee' in message_content or 'staff' in message_content or 'worker' in message_content or 'personnel' in message_content)):
+                    print(f"🔍 DEBUG: enhanced_router - DETECTED EMPLOYEE OPERATION, forcing employee_agent")
+                    # Force employee agent and update state
+                    state['current_agent'] = 'employee_agent'
+                    if 'data' not in state:
+                        state['data'] = {}
+                    state['data']['current_agent'] = 'employee_agent'
+                    state['data']['routing_completed'] = True
+                    return 'employee_agent'
+        
         # 🔧 FIX: Check if we've already routed to prevent multiple iterations
+        # BUT only if this is not a new user message (tool results should not trigger re-routing)
         if state.get('data', {}).get('routing_completed'):
-            print(f"🔍 DEBUG: enhanced_router - routing already completed, skipping")
-            return state.get('data', {}).get('current_agent', 'client_agent')
+            # Check if this is a new user message (not a tool result)
+            last_message = state['messages'][-1] if state['messages'] else None
+            is_new_user_message = (
+                last_message and 
+                isinstance(last_message, dict) and 
+                last_message.get('role') == 'user' and
+                'content' in last_message and
+                not last_message.get('tool_call_id')  # Not a tool result
+            )
+            
+            if not is_new_user_message:
+                print(f"🔍 DEBUG: enhanced_router - routing already completed for tool result, skipping")
+                # CRITICAL FIX: Check top-level current_agent first, then data.current_agent
+                current_agent = state.get('current_agent') or state.get('data', {}).get('current_agent', 'client_agent')
+                print(f"🔍 DEBUG: enhanced_router - returning current_agent: {current_agent}")
+                print(f"🔍 DEBUG: enhanced_router - state data: {state.get('data', {})}")
+                return current_agent
+            else:
+                print(f"🔍 DEBUG: enhanced_router - new user message detected, re-evaluating routing")
+                # Reset routing state for new user message
+                if 'routing_completed' in state.get('data', {}):
+                    del state['data']['routing_completed']
+                if 'current_agent' in state:
+                    del state['current_agent']
+        
+        # 🔧 FIX: Check if sync router has already made a decision (top-level current_agent)
+        if state.get('current_agent') and state['current_agent'] != 'router':
+            print(f"🔍 DEBUG: enhanced_router - sync router already decided: {state['current_agent']}")
+            # Mark routing as completed and return the sync router's decision
+            if 'data' not in state:
+                state['data'] = {}
+            state['data']['routing_completed'] = True
+            state['data']['current_agent'] = state['current_agent']
+            return state['current_agent']
         
         # Mark routing as completed to prevent loops
         if 'data' not in state:
@@ -165,13 +231,12 @@ def after_agent_execution(state: AgentState) -> str:
 
     last_message = state['messages'][-1]
 
-    # 🚀 OPTIMIZATION: Check if this is a simple response that doesn't need tools
+    # If the response is a simple acknowledgment or greeting, end immediately
     if hasattr(last_message, 'content') and last_message.content:
         content = last_message.content.lower()
-        # If the response is a simple acknowledgment or greeting, end immediately
         simple_responses = [
             "hello", "hi", "hey", "greetings", "thank you", "thanks",
-            "ok", "okay", "got it", "understood", "sure", "yes", "no"
+            "ok", "okay", "got it", "understood", "sure"
         ]
         if any(response in content for response in simple_responses) and len(content) < 100:
             print(f"🛑 Early termination: Simple response detected, no tools needed")
@@ -233,12 +298,123 @@ def after_tool_execution(state: AgentState) -> str:
 
     # Check if the last tool result indicates completion
     last_message = state['messages'][-1] if state['messages'] else None
-    if last_message and hasattr(last_message, 'content'):
-        content = last_message.content.lower()
-        # If tool result indicates success or completion, end conversation
-        if any(keyword in content for keyword in ['successfully', 'completed', 'updated', 'created', 'uploaded']):
-            print("🛑 LOOP PREVENTION: Tool execution completed successfully, ending conversation")
+    content = ""
+    
+    # Handle different message formats for tool results
+    if last_message:
+        if hasattr(last_message, 'content') and last_message.content:
+            content = last_message.content.lower()
+        elif isinstance(last_message, dict):
+            # Tool result messages are stored as dicts with 'content' key
+            content = last_message.get('content', '').lower()
+        
+        print(f"🔍 DEBUG: after_tool_execution - last message content: {content[:200]}...")
+    
+    # Check for successful tool execution using the stored success status
+    last_tool_success = state.get('data', {}).get('last_tool_success')
+    print(f"🔍 DEBUG: after_tool_execution - last_tool_success: {last_tool_success}")
+    
+    if last_tool_success is True:
+        print("🛑 LOOP PREVENTION: Tool execution completed successfully, clearing context")
+        # Clear operation context after successful operations to prevent interference with next request
+        if 'current_contract_id' in state.get('data', {}):
+            del state['data']['current_contract_id']
+            print("🔍 DEBUG: Cleared current_contract_id after successful operation")
+        if 'user_operation' in state.get('data', {}):
+            del state['data']['user_operation']
+            print("🔍 DEBUG: Cleared user_operation after successful operation")
+        if 'original_user_request' in state.get('data', {}):
+            del state['data']['original_user_request']
+            print("🔍 DEBUG: Cleared original_user_request after successful operation")
+        if 'current_workflow' in state.get('data', {}):
+            del state['data']['current_workflow']
+            print("🔍 DEBUG: Cleared current_workflow after successful operation")
+        if 'current_client' in state.get('data', {}):
+            del state['data']['current_client']
+            print("🔍 DEBUG: Cleared current_client after successful operation")
+        # CRITICAL FIX: Reset agent routing state for next request
+        if 'current_agent' in state:
+            del state['current_agent']
+            print("🔍 DEBUG: Cleared current_agent after successful operation")
+        if 'routing_completed' in state.get('data', {}):
+            del state['data']['routing_completed']
+            print("🔍 DEBUG: Cleared routing_completed after successful operation")
+        # Clear the success status to prevent repeated clearing
+        if 'last_tool_success' in state.get('data', {}):
+            del state['data']['last_tool_success']
+            print("🔍 DEBUG: Cleared last_tool_success status")
+        return END
+    
+    # Fallback: Check message content for success keywords (for backward compatibility)
+    if content:
+        # Special check for create_client_and_contract success
+        if 'successfully created client' in content and 'contract' in content:
+            print("🛑 LOOP PREVENTION: create_client_and_contract completed successfully, ending conversation")
+            # Clear operation context after successful operations
+            if 'current_contract_id' in state.get('data', {}):
+                del state['data']['current_contract_id']
+                print("🔍 DEBUG: Cleared current_contract_id after successful create_client_and_contract")
+            if 'user_operation' in state.get('data', {}):
+                del state['data']['user_operation']
+                print("🔍 DEBUG: Cleared user_operation after successful create_client_and_contract")
+            if 'original_user_request' in state.get('data', {}):
+                del state['data']['original_user_request']
+                print("🔍 DEBUG: Cleared original_user_request after successful create_client_and_contract")
+            if 'current_workflow' in state.get('data', {}):
+                del state['data']['current_workflow']
+                print("🔍 DEBUG: Cleared current_workflow after successful create_client_and_contract")
             return END
+            
+        # TODO: CONFIRMATION FIX - Check for confirmation responses and clear context after successful operations
+        # If tool result indicates success or completion, end conversation
+        success_keywords = ['successfully', 'completed', 'updated', 'created', 'uploaded', 'deleted', 'removed', 'added']
+        if any(keyword in content for keyword in success_keywords):
+            print("🛑 LOOP PREVENTION: Tool execution completed successfully (fallback detection), ending conversation")
+            # Clear operation context after successful operations to prevent interference with next request
+            if 'current_contract_id' in state.get('data', {}):
+                del state['data']['current_contract_id']
+                print("🔍 DEBUG: Cleared current_contract_id after successful operation")
+            if 'user_operation' in state.get('data', {}):
+                del state['data']['user_operation']
+                print("🔍 DEBUG: Cleared user_operation after successful operation")
+            if 'original_user_request' in state.get('data', {}):
+                del state['data']['original_user_request']
+                print("🔍 DEBUG: Cleared original_user_request after successful operation")
+            if 'current_workflow' in state.get('data', {}):
+                del state['data']['current_workflow']
+                print("🔍 DEBUG: Cleared current_workflow after successful operation")
+            if 'current_client' in state.get('data', {}):
+                del state['data']['current_client']
+                print("🔍 DEBUG: Cleared current_client after successful operation")
+            # CRITICAL FIX: Reset agent routing state for next request
+            if 'current_agent' in state:
+                del state['current_agent']
+                print("🔍 DEBUG: Cleared current_agent after successful operation")
+            if 'routing_completed' in state.get('data', {}):
+                del state['data']['routing_completed']
+                print("🔍 DEBUG: Cleared routing_completed after successful operation")
+            return END
+            
+        # TODO: CONFIRMATION FIX - Also clear context when user confirms an operation (yes/no responses)
+        # Check if this is a confirmation response that completed an operation
+        if isinstance(content, str):
+            content_lower = content.lower().strip()
+            confirmation_words = ['yes', 'y', 'ok', 'okay', 'confirm', 'proceed', 'go ahead', 'sure', 'alright']
+            
+            # Check if user confirmed and we have an active operation
+            if content_lower in confirmation_words:
+                current_workflow = state.get('data', {}).get('current_workflow')
+                user_operation = state.get('data', {}).get('user_operation')
+                
+                print(f"🔍 DEBUG WORKFLOW: User said '{content_lower}', current_workflow='{current_workflow}', user_operation='{user_operation}'")
+                
+                # If this is a confirmation for an upload operation, clear context after processing
+                if current_workflow == 'upload' and user_operation == 'upload_contract_document':
+                    print("🛑 LOOP PREVENTION: User confirmed upload operation, will clear context after processing")
+                    # Don't clear context immediately - let the agent process the confirmation first
+                    # The context will be cleared when the actual upload completes
+                else:
+                    print(f"🔍 DEBUG WORKFLOW: Not an upload confirmation - workflow='{current_workflow}', operation='{user_operation}'")
 
     # CRITICAL FIX: After tool execution, end the workflow
     # The tool results are already formatted and ready for the user
