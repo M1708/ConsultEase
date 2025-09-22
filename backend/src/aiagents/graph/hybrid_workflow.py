@@ -7,7 +7,7 @@ OpenAI Agents SDK agents while maintaining backward compatibility.
 
 from langgraph.graph import StateGraph, END
 from typing import Dict, Any
-
+import traceback
 from .state import AgentState
 from .router import router
 from .nodes import contract_agent_node, employee_agent_node, client_agent_node, deliverable_agent_node, time_agent_node, user_agent_node
@@ -180,7 +180,7 @@ def enhanced_router(state: AgentState) -> str:
 
     except Exception as e:
         print(f"❌ enhanced_router error: {e}")
-        import traceback
+        
         print(f"❌ enhanced_router traceback: {traceback.format_exc()}")
         state['data']['current_agent'] = 'client_agent'
         return "client_agent"
