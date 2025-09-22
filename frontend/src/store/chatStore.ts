@@ -113,7 +113,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
       // Check if the request was successful
       if (!response.success) {
-        throw new Error(response.response || response.error || 'Request failed');
+        const msg = response.response && typeof response.response === 'string'
+          ? response.response
+          : 'Request failed';
+        throw new Error(msg);
       }
 
       // Add agent response to chat
